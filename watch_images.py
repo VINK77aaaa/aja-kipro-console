@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-实时监视图片文件夹：一有新图片，就自动导入达芬奇媒体池并追加到当前时间线末尾。
+实时监视图片文件夹：新图片先自动归档（备份）到桌面"调试静帧存档"文件夹，
+再从归档位置导入达芬奇媒体池并追加到当前时间线末尾。
 
-用法：双击"实时导入.bat"启动（黑色小窗口会最小化到任务栏），关闭那个窗口即停止监视。
+用法：双击"实时导入.bat"启动（黑色小窗口最小化在任务栏），关闭那个窗口即停止监视。
 
 规则：
-- 只导入"监视启动之后"新放进来的图片，文件夹里原有的图片不会重复导入
-- 图片正在复制中不会导入，等文件复制完成（大小稳定）后才导入
-- 达芬奇没开或没进入项目时会自动等待，图片先排队，进入项目后自动补导入
+- 新图片复制完成后立刻移动到归档文件夹，监视文件夹保持干净
+- 达芬奇从归档位置导入，所以清理监视文件夹永远不会造成"媒体离线"
+- 启动时文件夹里已有的图片：没导入过的会补导入；已经被时间线引用的会跳过，
+  等你在时间线上删掉对应片段后会自动归档清理
+- 正在复制中的文件会等复制完成（大小稳定）才处理
+- 达芬奇没开或没进入项目时会自动等待，图片排队，进入项目后自动补导入
 - 详细日志写在同目录下的"监视日志.txt"
 """
 import os
@@ -22,7 +26,7 @@ IMAGE_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "图片"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".tga", ".webp", ".dng")
 STILL_SECONDS = 5        # 每张图片在时间线上的时长（秒）
 POLL_INTERVAL = 2        # 每隔几秒扫一次文件夹
-IMPORT_EXISTING_ON_START = False  # True = 启动时把文件夹里已有的图片也导入一遍
+ARCHIVE_FOLDER = os.path.join(os.path.expanduser("~"), "Desktop", "调试静帧存档")
 FUSION_DLL = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
 # ================================================
 
@@ -91,26 +95,13 @@ def list_images():
         return []
 
 
-def get_current_page(resolve):
-    try:
-        return resolve.GetCurrentPage()
-    except Exception:
-        return None
-
-
-def restore_page(resolve, page):
-    """导入操作会把界面切到剪辑页，这里把用户原本所在页面（比如调色页）切回去"""
-    if not page:
-        return
-    try:
-        if resolve.GetCurrentPage() != page:
-            resolve.OpenPage(page)
-    except Exception:
-        pass
-
-
 def import_files(resolve, project, files):
-    page = get_current_page(resolve)
+    """导入媒体池并追加到时间线；结束后把页面切回用户原来所在的位置"""
+    page = None
+    try:
+        page = resolve.GetCurrentPage()
+    except Exception:
+        page = None
     try:
         media_pool = project.GetMediaPool()
         clips = media_pool.ImportMedia(files)
@@ -137,39 +128,135 @@ def import_files(resolve, project, files):
             where = "时间线「%s」末尾" % timeline.GetName()
         return len(clips), where
     finally:
-        restore_page(resolve, page)
+        try:
+            if page and resolve.GetCurrentPage() != page:
+                resolve.OpenPage(page)
+        except Exception:
+            pass
+
+
+def iter_pool_clips(folder):
+    """递归遍历媒体池所有文件夹里的片段"""
+    clips = list(folder.GetClipList() or [])
+    for sub in (folder.GetSubFolderList() or []):
+        clips.extend(iter_pool_clips(sub))
+    return clips
+
+
+def clip_file_path(clip):
+    """取片段的源文件路径；离线片段拿到的路径带"离线 - "之类前缀"""
+    try:
+        path = clip.GetClipProperty("File Path") or ""
+    except Exception:
+        path = ""
+    return path
+
+
+def pool_referenced_paths(project):
+    """媒体池里所有片段当前引用的源文件路径集合（含离线片段记录的原路径）"""
+    refs = set()
+    try:
+        clips = iter_pool_clips(project.GetMediaPool().GetRootFolder())
+    except Exception:
+        return refs
+    for c in clips:
+        p = clip_file_path(c)
+        if not p:
+            continue
+        refs.add(os.path.normpath(p.strip()))
+        if " - " in p:
+            # 剥掉"离线 - "/"Offline - "前缀再记一份
+            refs.add(os.path.normpath(p.split(" - ", 1)[1].strip()))
+    return refs
+
+
+def archive_files(files):
+    """把文件移动到归档文件夹（重名自动加序号），返回 [(旧路径, 新路径), ...]"""
+    if not files:
+        return []
+    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+    moved = []
+    for src in files:
+        dest = os.path.join(ARCHIVE_FOLDER, os.path.basename(src))
+        try:
+            if os.path.exists(dest):
+                base, ext = os.path.splitext(os.path.basename(src))
+                i = 1
+                while os.path.exists(dest):
+                    dest = os.path.join(ARCHIVE_FOLDER, "%s(%d)%s" % (base, i, ext))
+                    i += 1
+            os.replace(src, dest)
+            moved.append((src, dest))
+        except OSError as e:
+            log("归档失败 %s：%s" % (os.path.basename(src), e))
+    return moved
 
 
 def main():
     os.makedirs(IMAGE_FOLDER, exist_ok=True)
     log("实时导入已启动，监视文件夹：" + IMAGE_FOLDER)
-    log("只导入从现在起新放进来的图片。关闭本窗口即停止监视。")
+    log("新图片会先归档到 %s 再导入达芬奇，监视文件夹保持干净。" % ARCHIVE_FOLDER)
+    log("关闭本窗口即停止监视。")
 
-    seen = set() if IMPORT_EXISTING_ON_START else set(list_images())
-    sizes = {}      # 新文件的大小记录，连续两次一致才算复制完成
-    pending = []    # 复制完成、等待导入的图片
+    seen = set()      # 已处理完的图片（跳过或导入失败放弃的），防止重复处理
+    sizes = {}        # 正在等大小稳定的新文件
+    pending = []      # 已归档、等待导入达芬奇的文件
+    deferred = set()  # 还在被时间线引用、等片段删除后自动归档的图片
     fail_count = 0
     last_wait_log = 0.0
     was_connected = False
 
     while True:
         try:
-            # ---------- 扫描新图片 ----------
-            for f in list_images():
-                if f in seen:
+            now_files = list_images()
+
+            # ---------- 1. 扫描新图片：复制完成就归档并排队导入 ----------
+            stable = []
+            for f in now_files:
+                if f in seen or f in pending or f in deferred:
                     continue
                 try:
                     size = os.path.getsize(f)
                 except OSError:
                     continue
                 if size > 0 and sizes.get(f) == size:
-                    seen.add(f)
-                    pending.append(f)
-                    sizes.pop(f, None)
+                    stable.append(f)
                 else:
                     sizes[f] = size
 
-            # ---------- 导入排队的图片 ----------
+            if stable:
+                resolve = get_resolve()
+                project = resolve.GetProjectManager().GetCurrentProject() if resolve else None
+                if project is None:
+                    if time.time() - last_wait_log > 15:
+                        log("等待达芬奇...有 %d 张图片待处理" % len(stable))
+                        last_wait_log = time.time()
+                else:
+                    if not was_connected:
+                        log("已连接到达芬奇，当前项目：" + project.GetName())
+                        was_connected = True
+                    referenced = pool_referenced_paths(project)
+                    for f in stable:
+                        sizes.pop(f, None)
+                        if os.path.normpath(f) in referenced:
+                            # 已经导入过（旧版脚本导入的），不能移动文件否则媒体离线
+                            seen.add(f)
+                            deferred.add(f)
+                            log("跳过已导入过的图片：%s（时间线片段删除后会自动归档）"
+                                % os.path.basename(f))
+                            continue
+                        moved = archive_files([f])
+                        if moved:
+                            log("已归档新图片：" + os.path.basename(f))
+                            pending.append(moved[0][1])
+                        else:
+                            # 归档失败（文件被占用等），先从原位置导入，之后自动补归档
+                            seen.add(f)
+                            deferred.add(f)
+                            pending.append(f)
+                            log("归档失败，先从原位置导入：" + os.path.basename(f))
+
+            # ---------- 2. 导入排队的图片 ----------
             if pending:
                 resolve = get_resolve()
                 if resolve is None:
@@ -207,10 +294,26 @@ def main():
                                 pending = []
                                 fail_count = 0
 
+            # ---------- 3. 之前被时间线引用而跳过的图片：片段删除后自动归档 ----------
+            if deferred:
+                resolve = get_resolve()
+                project = resolve.GetProjectManager().GetCurrentProject() if resolve else None
+                if project is not None:
+                    referenced = pool_referenced_paths(project)
+                    ready = [f for f in deferred if os.path.normpath(f) not in referenced]
+                    if ready:
+                        moved = archive_files(ready)
+                        for f in ready:
+                            deferred.discard(f)
+                            seen.discard(f)  # 归档后允许以后重新丢同名图
+                        if moved:
+                            log("时间线片段已删除，自动归档清理 %d 张旧图片" % len(moved))
+
             time.sleep(POLL_INTERVAL)
         except Exception:
             log("发生错误：\n" + traceback.format_exc())
             time.sleep(3)
 
 
-main()
+if __name__ == "__main__":
+    main()
