@@ -316,7 +316,6 @@
           <option value="error" selected>「严重」+「错误」触发</option>
           <option value="all">全部级别触发</option>
         </select>
-        <button class="mini" id="alarm-test" type="button">试听</button>
         <button class="mini" id="alarm-mute" type="button">静音</button>
       </span>
     </h2>
@@ -1247,6 +1246,7 @@ let alarmsBusy = false;
 // ---- 告警音与动画设置（持久化在 localStorage）----
 const ALARM_LEVELS = { fatal: 2, error: 1, all: 0 }; // 触发阈值（severity >= 阈值）
 const ALARM_SOUND_SECONDS = 3;                       // 警告音时长
+const ALARM_VOLUME = 0.5;                            // 警告音音量（0~1，越大越响）
 const LS_LEVEL = 'aja_alarm_level';
 const LS_MUTE = 'aja_alarm_mute';
 
@@ -1307,12 +1307,12 @@ function playAlarmSound(seconds) {
   let t = ctx.currentTime + 0.03;
   const end = t + total;
   while (t < end) {
-    beep(ctx, t, 1046, 0.16, 0.2);          // C6
+    beep(ctx, t, 1046, 0.16, ALARM_VOLUME);  // C6
     t += 0.22;
     if (t >= end) break;
-    beep(ctx, t, 784, 0.16, 0.2);           // G5
+    beep(ctx, t, 784, 0.16, ALARM_VOLUME);   // G5
     t += 0.22;
-    t += 0.42;                              // 组间停顿
+    t += 0.42;                               // 组间停顿
   }
   // 自动播放被拦时提示一次
   if (ctx.state !== 'running' && !audioWarned) {
@@ -1477,10 +1477,6 @@ $('alarm-mute').addEventListener('click', () => {
   renderMuteBtn();
   if (alarmMuted) toast('已静音 —— 告警仍会在页面显示并闪烁', true);
   else { playAlarmSound(1); toast('已取消静音', true); }
-});
-$('alarm-test').addEventListener('click', () => {
-  if (playAlarmSound(ALARM_SOUND_SECONDS)) { flashPage(); toast('警告音 + 闪烁动画 试听', true); }
-  else toast('当前浏览器不支持 Web Audio，无法发出警告音', false);
 });
 $('auto-refresh').addEventListener('change', () => {});
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) refreshAll(); }, 3000);
