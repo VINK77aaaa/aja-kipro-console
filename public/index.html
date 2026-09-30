@@ -141,7 +141,7 @@
   .card .v small { color: var(--dim); font-weight: 400; }
   .card.tc { grid-column: span 2; }
   .card.tc .v { font-family: var(--mono); font-size: 38px; letter-spacing: 2px; color: #fff; }
-  .card.wide { grid-column: span 2; }
+  .card.full { grid-column: 1 / -1; }
 
   .badge {
     display: inline-block; border-radius: 8px; padding: 3px 12px; font-weight: 700; font-size: 15px;
@@ -300,7 +300,7 @@
     <div class="card"><div class="k">当前片段</div><div class="v" id="st-clip">—</div></div>
     <div class="card"><div class="k">介质槽</div><div class="v" id="st-slot">—</div></div>
     <div class="card"><div class="k">介质格式<small>（跟随输入信号）</small> / 卷名<button type="button" class="iwarn" aria-label="分辨率/帧率为什么不能改" aria-expanded="false">⚠</button></div><div class="v" id="st-mediafmt">—</div></div>
-    <div class="card wide">
+    <div class="card full">
       <div class="k">剩余空间</div>
       <div class="v" id="st-avail">—</div>
       <div class="bar"><i id="st-avail-bar" style="width:0%"></i></div>
