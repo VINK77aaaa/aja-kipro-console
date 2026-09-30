@@ -328,7 +328,7 @@
   </section>
 
   <section class="block">
-    <h2>健康状态 <span class="hint">面板服务 / 各设备在线 / 图片实时导入心跳</span></h2>
+    <h2>健康状态 <span class="hint">面板服务 / 各设备在线</span></h2>
     <div id="health-box"><div class="empty">正在读取…</div></div>
   </section>
 </div>
@@ -1170,20 +1170,6 @@ async function loadHealth() {
         d.online ? `在线 · ${d.ip}${d.product ? ' · ' + d.product : ''}` : `离线 · ${d.ip}`,
         !d.online,
       ));
-    }
-    const w = h.watcher;
-    if (!w) {
-      box.appendChild(hrow('图片实时导入', '未检测到心跳 —— watch_images.py 未运行（或尚未启动过）', true));
-    } else {
-      const bits = [];
-      bits.push(w.alive ? `运行中（${w.beat_age_s}s 前心跳）` : `心跳已停止（${w.beat_age_s}s 未更新）`);
-      if (w.connected) bits.push(`达芬奇已连接${w.project ? ' · 项目 ' + w.project : ''}`);
-      else bits.push('达芬奇未连接');
-      if (typeof w.pending === 'number') bits.push(`待导入 ${w.pending} 张`);
-      if (typeof w.deferred === 'number' && w.deferred) bits.push(`待归档 ${w.deferred} 张`);
-      if (typeof w.max_timeline === 'number' && w.max_timeline) bits.push(`时间线上限 ${w.max_timeline} 张`);
-      box.appendChild(hrow('图片实时导入', bits.join(' · '), !w.alive));
-      box.appendChild(hrow('监视文件夹', w.watching || '—', false));
     }
   } catch (e) {
     box.innerHTML = `<div class="empty">读取健康状态失败：${e.message}</div>`;

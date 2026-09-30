@@ -36,7 +36,6 @@ const MAX_VALUE_LEN = 256;
 
 const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
 const DEVICES_FILE = path.join(__dirname, 'devices.txt');
-const WATCHER_STATUS_PATH = path.join(__dirname, '..', '.watcher-status.json');
 const STARTED_AT = Date.now();
 
 // ==================== 设备列表 ====================
@@ -299,19 +298,6 @@ async function probeForAdd(ip) {
   }
 }
 
-function readWatcherStatus() {
-  try {
-    const raw = fs.readFileSync(WATCHER_STATUS_PATH, 'utf8');
-    const o = JSON.parse(raw);
-    if (!o || typeof o !== 'object') return null;
-    const beat = Number(o.last_beat) || 0;
-    const age = beat ? Math.max(0, Math.round(Date.now() / 1000 - beat)) : null;
-    return { ...o, beat_age_s: age, alive: age !== null && age <= 30 };
-  } catch {
-    return null;
-  }
-}
-
 // ==================== 服务 ====================
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -504,7 +490,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 健康状态：面板自身 + 各设备在线 + watcher 心跳
+    // 健康状态：面板自身 + 各设备在线
     if (p === '/api/health') {
       const devs = await Promise.all(
         DEVICES.map(async (d) => {
@@ -520,7 +506,6 @@ const server = http.createServer(async (req, res) => {
           node: process.version,
         },
         devices: devs,
-        watcher: readWatcherStatus(),
       });
       log('HEALTH');
       return;
