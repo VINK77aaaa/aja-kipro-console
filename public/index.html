@@ -285,7 +285,7 @@
     <span class="spacer"></span>
     <span class="devbar-actions">
       <button class="mini rec" id="btn-gang-rec" type="button">⏺ 全部录制</button>
-      <button class="mini stop" id="btn-gang-stop" type="button">⏹ 全部停止</button>
+      <button class="mini stop" id="btn-gang-stop" type="button" disabled title="已锁定：点击无效">⏹ 全部停止</button>
       <button class="mini" id="btn-add-dev" type="button">＋ 添加设备</button>
     </span>
   </div>
@@ -327,7 +327,7 @@
   <div class="transport">
     <button class="tbtn" id="btn-prev"><span class="ic">⏮</span>上一片段</button>
     <button class="tbtn play" id="btn-play"><span class="ic">▶</span>播放</button>
-    <button class="tbtn" id="btn-stop"><span class="ic">⏹</span>停止</button>
+    <button class="tbtn" id="btn-stop" disabled title="已锁定：点击无效"><span class="ic">⏹</span>停止</button>
     <button class="tbtn rec" id="btn-record"><span class="ic">⏺</span>录制</button>
     <button class="tbtn" id="btn-next">下一片段<span class="ic">⏭</span></button>
     <span class="updated" id="updated-at"></span>
@@ -527,6 +527,7 @@ const state = {
   online: false,
   refreshing: false,
   namingDirty: false,
+  stopLocked: true,  // 停止锁：默认锁死（fail-safe），由 /api/health 的 stop_lock 同步
 };
 
 function toast(msg, ok) {
@@ -535,6 +536,25 @@ function toast(msg, ok) {
   t.className = 'show ' + (ok ? 'ok' : 'err');
   clearTimeout(t._timer);
   t._timer = setTimeout(() => (t.className = ''), ok ? 3200 : 6000);
+}
+
+// —— 停止锁 ——
+// 「停止」与「全部停止」两个按钮的锁。
+// 真相源在服务端（AJA_STOP_LOCK，默认锁死）：HTML 里这两个按钮默认就是 disabled，
+// 只有健康接口明确回报 stop_lock === false 才解禁；服务端同时会 403 拦截，
+// 所以就算有人改前端脚本、或直接手搓请求，也一样停不下来。
+function applyStopLock() {
+  const locked = state.stopLocked;
+  const stopBtn = $('btn-stop');
+  if (stopBtn) {
+    stopBtn.title = locked ? '已锁定：点击无效' : '';
+    stopBtn.disabled = locked || !state.online; // 未锁定时沿用原来的「离线置灰」
+  }
+  const gangBtn = $('btn-gang-stop');
+  if (gangBtn) {
+    gangBtn.title = locked ? '已锁定：点击无效' : '';
+    gangBtn.disabled = locked;
+  }
 }
 
 function setOnline(on, errMsg) {
@@ -548,7 +568,8 @@ function setOnline(on, errMsg) {
   } else {
     b.classList.remove('show');
   }
-  document.querySelectorAll('.tbtn').forEach((el) => (el.disabled = !on));
+  document.querySelectorAll('.tbtn').forEach((el) => { if (el.id !== 'btn-stop') el.disabled = !on; });
+  applyStopLock(); // 停止锁优先级最高：设备在线也不解禁
   updateNamingEnabled();
 }
 
@@ -1139,13 +1160,14 @@ async function applyNaming() {
 const TRANSPORT_BTN = [
   { id: 'btn-prev',   value: 10, confirm: false, name: '上一片段' },
   { id: 'btn-play',   value: 1,  confirm: false, name: '播放' },
-  { id: 'btn-stop',   value: 4,  confirm: false, name: '停止' },
+  { id: 'btn-stop',   value: 4,  confirm: false, name: '停止', locked: true },
   { id: 'btn-record', value: 3,  confirm: true,  name: '录制' },
   { id: 'btn-next',   value: 9,  confirm: false, name: '下一片段' },
 ];
 for (const b of TRANSPORT_BTN) {
   $(b.id).addEventListener('click', async () => {
     if (!state.online) return;
+    if (b.locked && state.stopLocked) return; // 停止锁：点了也当没点
     if (b.confirm && !confirm(`确认向设备下发【${b.name}】命令？\n\n（当前无输入信号时设备会拒绝录制）`)) return;
     try {
       // 走带是瞬时命令，不做回读校验
@@ -1222,8 +1244,16 @@ async function loadHealth() {
   const box = $('health-box');
   try {
     const h = await api('/api/health');
+    // 停止锁：服务端为唯一真相源。只有明确回报 false 才解禁，其它情况一律锁死。
+    state.stopLocked = !(h.panel && h.panel.stop_lock === false);
+    applyStopLock();
     box.innerHTML = '';
     box.appendChild(hrow('面板服务', `运行中 · 端口 ${h.panel.port} · 已运行 ${fmtDur(h.panel.uptime_s)} · Node ${h.panel.node}`, false));
+    box.appendChild(hrow(
+      '停止锁',
+      state.stopLocked ? '🔒 已锁定 ——「停止」「全部停止」点击无效（解禁：用 AJA_STOP_LOCK=0 启动服务）' : '未锁定 —— 两个停止按钮可正常使用',
+      false,
+    ));
     for (const d of h.devices) {
       const isCur = String(d.id) === String(state.currentDev);
       box.appendChild(hrow(
@@ -1455,7 +1485,8 @@ initInfoTips();
 $('btn-clips').addEventListener('click', loadClips);
 $('btn-add-dev').addEventListener('click', openAddDevice);
 $('btn-gang-rec').addEventListener('click', () => gangCommand('record'));
-$('btn-gang-stop').addEventListener('click', () => gangCommand('stop'));
+$('btn-gang-stop').addEventListener('click', () => { if (state.stopLocked) return; gangCommand('stop'); });
+applyStopLock(); // 首屏即按锁状态置灰，不等健康接口回来
 
 // —— 告警声光控件 ——
 $('alarm-level').value = alarmLevel;

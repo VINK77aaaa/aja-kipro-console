@@ -11,6 +11,8 @@
 //   AJA_DEVICE_IP    单台设备 IP（旧配置，仍兼容）
 //   AJA_DEVICE_PORT  设备 HTTP 端口（默认 80）
 //   AJA_PANEL_PORT   本面板端口（默认 8321）
+//   AJA_STOP_LOCK    停止锁。默认 1（锁死）：「停止」「全部停止」在面板上点不动，
+//                    手搓请求也会被服务端 403 拒绝。设为 0 可临时解禁。
 //
 // 设备列表的读取优先级：AJA_DEVICES 环境变量 > 同目录 devices.txt > AJA_DEVICE_IP > 默认单台。
 // 多机（2~8 台）推荐直接编辑同目录的 devices.txt，一行一台，见该文件内的说明；
@@ -33,6 +35,11 @@ const DEVICE_TIMEOUT_MS = Number(process.env.AJA_DEVICE_TIMEOUT_MS || 8000);
 const PROBE_TIMEOUT_MS = 2500;
 const RETRY_DELAY_MS = 120;
 const MAX_VALUE_LEN = 256;
+
+// 停止锁：给「停止」「全部停止」加服务端闸门。
+// 锁死时：面板按钮置灰点不动 + 服务端对 TransportCommand=4 / gang cmd=stop 一律 403。
+// 需要临时解禁：用 AJA_STOP_LOCK=0 启动服务（不必改代码）。
+const STOP_LOCK = process.env.AJA_STOP_LOCK !== '0';
 
 const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
 const DEVICES_FILE = path.join(__dirname, 'devices.txt');
@@ -660,6 +667,13 @@ const server = http.createServer(async (req, res) => {
       const value = cmd === 'record' ? 3 : cmd === 'stop' ? 4 : null;
       if (value === null) return sendJson(res, 400, { error: 'cmd 只能是 record 或 stop' });
 
+      // 停止锁：拦在设备写入之前，锁死时连设备都不会被碰到
+      if (cmd === 'stop' && STOP_LOCK) {
+        return sendJson(res, 403, {
+          error: '「全部停止」已锁定（服务端 AJA_STOP_LOCK=1），已拒绝下发',
+        });
+      }
+
       const selRaw = (u.searchParams.get('devs') || '').trim();
       let targets;
       if (selRaw) {
@@ -722,6 +736,7 @@ const server = http.createServer(async (req, res) => {
           started_at: STARTED_AT,
           uptime_s: Math.round((Date.now() - STARTED_AT) / 1000),
           node: process.version,
+          stop_lock: STOP_LOCK,
         },
         devices: devs,
       });
@@ -804,6 +819,13 @@ const server = http.createServer(async (req, res) => {
       const doVerify = u.searchParams.get('verify') !== '0';
       if (!validParamName(name)) return sendJson(res, 400, { error: 'bad param' });
       if (!validValue(value)) return sendJson(res, 400, { error: 'bad value' });
+
+      // 停止锁：TransportCommand=4 即「停止」。锁死时一律拒绝，手搓请求也拦得住。
+      if (STOP_LOCK && name === 'eParamID_TransportCommand' && Number(value) === 4) {
+        return sendJson(res, 403, {
+          error: '「停止」已锁定（服务端 AJA_STOP_LOCK=1），已拒绝下发',
+        });
+      }
 
       const w = await deviceGet(
         dev,
