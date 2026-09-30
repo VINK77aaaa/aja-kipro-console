@@ -13,7 +13,15 @@
 //   AJA_PANEL_PORT   本面板端口（默认 8321）
 //
 // 设备列表的读取优先级：AJA_DEVICES 环境变量 > 同目录 devices.txt > AJA_DEVICE_IP > 默认单台。
-// 多机（2~8 台）推荐直接编辑同目录的 devices.txt，一行一台，见该文件内的说明。
+// 多机（2~8 台）推荐直接编辑同目录的 devices.txt，一行一台，见该文件内的说明；
+// 也可以在面板上点「＋ 添加设备」按 IP 添加（只读探测通过后追加写 devices.txt 并热重载，无需重启）。
+//
+// 接口一览：
+//   GET  /api/devices          设备清单 + 在线探测
+//   POST /api/devices/add      ?name=&ip=            添加设备（IPv4 校验 → 只读探测 → 追加 devices.txt）
+//   POST /api/devices/remove   ?target=<id|名称|IP>  移除设备（删除 devices.txt 对应行）
+//   POST /api/gang             ?cmd=record|stop&devs= 软 Gang：向多台设备群发走带命令（verify=0）
+//   GET  /api/all|get|options|set|clips|health       原有单机接口（带 ?dev= 指定设备）
 
 const http = require('http');
 const fs = require('fs');
@@ -64,13 +72,61 @@ function parseDevices() {
     });
 }
 
-const DEVICES = parseDevices();
+let DEVICES = parseDevices();
+
+// 改完 devices.txt 后热重载设备列表（无需重启面板）
+function reloadDevices() {
+  DEVICES = parseDevices();
+  return DEVICES;
+}
+
+// 设备列表当前来自哪里：环境变量 > devices.txt > 单台环境变量 > 默认
+function devicesSource() {
+  if ((process.env.AJA_DEVICES || '').trim()) return 'env';
+  if (readDevicesFileLines().some((l) => l.trim() && !l.trim().startsWith('#'))) return 'file';
+  if ((process.env.AJA_DEVICE_IP || '').trim()) return 'env-ip';
+  return 'default';
+}
+
+// devices.txt 原始行（保留注释与顺序），读不到返回 []
+function readDevicesFileLines() {
+  try {
+    return fs.readFileSync(DEVICES_FILE, 'utf8').split(/\r?\n/);
+  } catch {
+    return [];
+  }
+}
+
+// 原子写（先写 .tmp 再改名，避免半截文件）
+function writeFileAtomic(file, content) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, content, 'utf8');
+  fs.renameSync(tmp, file);
+}
+
+// 严格 IPv4 校验（4 段 0-255）
+function isValidIPv4(s) {
+  const m = String(s || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  return m.slice(1).every((x) => {
+    if (x.length > 1 && x.startsWith('0')) return false; // 拒绝 01.02.03.04 这类写法
+    const n = Number(x);
+    return n >= 0 && n <= 255;
+  });
+}
+
+// 名称合法性：不能含分隔符/注释符/控制字符
+function isValidDeviceName(s) {
+  if (typeof s !== 'string') return false;
+  if (s.length > 32) return false;
+  return !/[@,#\r\n\t]/.test(s) && !/[\u0000-\u001f\u007f]/.test(s);
+}
 
 // 按 id 或名称解析设备；不传则用第一台（保持旧行为）
 function resolveDevice(sel) {
   if (sel === undefined || sel === null || sel === '') return DEVICES[0] || null;
   const s = String(sel).trim().toLowerCase();
-  return DEVICES.find((d) => d.id === s || d.name.toLowerCase() === s) || null;
+  return DEVICES.find((d) => d.id === s || d.name.toLowerCase() === s || d.ip === s) || null;
 }
 
 // —— 状态页轮询的参数集合（一次请求批量取回） ——
@@ -217,6 +273,32 @@ async function probeDevice(device) {
   }
 }
 
+// 添加设备用的探测：只读 GET 一次 eParamID_ProductID，返回可读的失败原因
+// 注意：这里绝不向设备写任何参数。
+async function probeForAdd(ip) {
+  try {
+    const r = await deviceGetOnce(
+      { ip },
+      '/config?action=get&paramid=eParamID_ProductID',
+      PROBE_TIMEOUT_MS,
+    );
+    const parsed = parseParamJson(r.body);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason: `该地址有响应，但没有返回 eParamID_ProductID（HTTP ${r.status}）—— 看起来不是 AJA Ki Pro 设备`,
+      };
+    }
+    return { ok: true, product: parsed.value_name || parsed.value, status: r.status };
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (/timeout/i.test(msg)) {
+      return { ok: false, reason: '连接超时 —— IP 不可达，或设备不在同一网段 / 被防火墙拦截' };
+    }
+    return { ok: false, reason: `无法连接（${msg}）` };
+  }
+}
+
 function readWatcherStatus() {
   try {
     const raw = fs.readFileSync(WATCHER_STATUS_PATH, 'utf8');
@@ -256,8 +338,169 @@ const server = http.createServer(async (req, res) => {
           return { id: d.id, name: d.name, ip: d.ip, online: info.online, product: info.product };
         }),
       );
-      sendJson(res, 200, { devices: list });
+      sendJson(res, 200, { devices: list, source: devicesSource() });
       log('DEV');
+      return;
+    }
+
+    // —— F1：添加设备（按 IP）——
+    // 流程：IPv4 校验 → 查重 → 只读探测 ProductID → 追加写 devices.txt → 热重载
+    // 全程不向设备写任何参数。
+    if (p === '/api/devices/add' && req.method === 'POST') {
+      const rawName = (u.searchParams.get('name') || '').trim();
+      const ip = (u.searchParams.get('ip') || '').trim();
+      const source = devicesSource();
+      if (source === 'env') {
+        return sendJson(res, 400, {
+          error: '当前设备列表由环境变量 AJA_DEVICES 提供，写 devices.txt 不会生效。请改用 devices.txt，或先清除该环境变量。',
+        });
+      }
+      if (rawName && !isValidDeviceName(rawName)) {
+        return sendJson(res, 400, { error: '设备名称非法：不能含 @ , # 或换行，且不超过 32 个字符' });
+      }
+      if (!isValidIPv4(ip)) {
+        return sendJson(res, 400, { error: `IP 格式不对：「${ip || '(空)'}」不是合法的 IPv4（形如 10.10.12.54）` });
+      }
+      if (DEVICES.some((d) => d.ip === ip)) {
+        const exist = DEVICES.find((d) => d.ip === ip);
+        return sendJson(res, 409, { error: `该 IP 已在设备列表中（${exist.name}@${exist.ip}）`, device: exist });
+      }
+      if (rawName && DEVICES.some((d) => d.name.toLowerCase() === rawName.toLowerCase())) {
+        return sendJson(res, 409, { error: `设备名称「${rawName}」已存在，请换一个` });
+      }
+
+      const probe = await probeForAdd(ip);
+      if (!probe.ok) return sendJson(res, 502, { error: `探测失败：${probe.reason}`, ip });
+
+      const name = rawName || 'AJA' + (DEVICES.length + 1);
+      let txt = '';
+      try {
+        txt = fs.readFileSync(DEVICES_FILE, 'utf8');
+      } catch {
+        txt = '';
+      }
+      if (txt && !txt.endsWith('\n')) txt += '\n';
+      txt += `${name}@${ip}\n`;
+      try {
+        writeFileAtomic(DEVICES_FILE, txt);
+      } catch (e) {
+        return sendJson(res, 500, { error: `写入 devices.txt 失败：${e.message}` });
+      }
+      reloadDevices();
+      const added = DEVICES.find((d) => d.ip === ip) || null;
+      sendJson(res, 200, {
+        ok: true,
+        added: added ? { id: added.id, name: added.name, ip: added.ip, product: probe.product } : null,
+        product: probe.product,
+        note: source === 'env-ip' ? 'devices.txt 优先级高于 AJA_DEVICE_IP，后续以本文件为准' : undefined,
+      });
+      log('DEV-ADD');
+      return;
+    }
+
+    // —— F1：移除设备（删除 devices.txt 对应行）——
+    if (p === '/api/devices/remove' && req.method === 'POST') {
+      if (devicesSource() === 'env') {
+        return sendJson(res, 400, { error: '当前设备列表由环境变量 AJA_DEVICES 提供，面板无法移除，请改环境变量。' });
+      }
+      const dev = resolveDevice(u.searchParams.get('target'));
+      if (!dev) return sendJson(res, 400, { error: '未知设备' });
+      const lines = readDevicesFileLines();
+      let hit = 0;
+      const kept = lines.filter((line) => {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) return true;
+        const m = t.match(/^([^@]+)@(.+)$/);
+        const lip = (m ? m[2] : t).trim();
+        if (lip === dev.ip) {
+          hit++;
+          return false;
+        }
+        return true;
+      });
+      if (!hit) {
+        return sendJson(res, 400, {
+          error: `设备 ${dev.name}（${dev.ip}）不在 devices.txt 里（可能来自环境变量或默认值），面板无法移除`,
+        });
+      }
+      // 拒绝移除最后一台：否则 devices.txt 变空会静默回退到默认单台 10.10.12.53，
+      // 看上去像"删不掉 / 被改名"，比明确报错更难懂。
+      const remains = kept.some((l) => l.trim() && !l.trim().startsWith('#'));
+      if (!remains) {
+        return sendJson(res, 400, {
+          error: '这是设备列表里的最后一台，不能从面板移除（否则面板会回退到默认设备）。确需清空请直接编辑 devices.txt。',
+        });
+      }
+      let txt = kept.join('\n');
+      if (!txt.endsWith('\n')) txt += '\n';
+      try {
+        writeFileAtomic(DEVICES_FILE, txt);
+      } catch (e) {
+        return sendJson(res, 500, { error: `写入 devices.txt 失败：${e.message}` });
+      }
+      reloadDevices();
+      sendJson(res, 200, {
+        ok: true,
+        removed: { id: dev.id, name: dev.name, ip: dev.ip },
+        devices: DEVICES.map((d) => ({ id: d.id, name: d.name, ip: d.ip })),
+      });
+      log('DEV-RM');
+      return;
+    }
+
+    // —— F2：软 Gang（群发走带命令）——
+    // cmd=record(3) | stop(4)；devs 为逗号分隔的设备 id/名称，缺省=全部设备。
+    // 走带是瞬时命令，verify=0（不回读），与单机按钮语义一致。
+    if (p === '/api/gang' && req.method === 'POST') {
+      const cmd = (u.searchParams.get('cmd') || '').trim().toLowerCase();
+      const value = cmd === 'record' ? 3 : cmd === 'stop' ? 4 : null;
+      if (value === null) return sendJson(res, 400, { error: 'cmd 只能是 record 或 stop' });
+
+      const selRaw = (u.searchParams.get('devs') || '').trim();
+      let targets;
+      if (selRaw) {
+        const sels = selRaw.split(',').map((s) => s.trim()).filter(Boolean);
+        const resolved = sels.map((s) => resolveDevice(s));
+        if (resolved.some((d) => !d)) return sendJson(res, 400, { error: '目标设备列表中有未知设备' });
+        // 去重（按 ip）
+        const seen = new Set();
+        targets = resolved.filter((d) => (seen.has(d.ip) ? false : seen.add(d.ip)));
+      } else {
+        targets = DEVICES.slice();
+      }
+      if (!targets.length) return sendJson(res, 400, { error: '没有可下发的设备' });
+
+      const results = await mapWithConcurrency(targets, 4, async (d) => {
+        try {
+          const r = await deviceGet(
+            d,
+            `/config?action=set&paramid=eParamID_TransportCommand&value=${value}`,
+          );
+          const parsed = parseParamJson(r.body);
+          return {
+            id: d.id,
+            name: d.name,
+            ip: d.ip,
+            ok: !!parsed,
+            http_status: r.status,
+            returned: parsed ? parsed.value_name || parsed.value : null,
+            error: parsed ? null : `设备未确认（HTTP ${r.status}）`,
+          };
+        } catch (e) {
+          return { id: d.id, name: d.name, ip: d.ip, ok: false, error: String((e && e.message) || e) };
+        }
+      });
+      const okCount = results.filter((r) => r.ok).length;
+      sendJson(res, 200, {
+        ok: true,
+        cmd,
+        value,
+        total: results.length,
+        ok_count: okCount,
+        fail_count: results.length - okCount,
+        results,
+      });
+      log('GANG');
       return;
     }
 
@@ -406,6 +649,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PANEL_PORT, '127.0.0.1', () => {
   console.log('AJA Ki Pro 中文控制台已启动');
   console.log(`  本地面板:  http://127.0.0.1:${PANEL_PORT}`);
+  console.log(`  设备列表来源: ${devicesSource() === 'env' ? '环境变量 AJA_DEVICES' : devicesSource() === 'file' ? 'devices.txt' : devicesSource() === 'env-ip' ? '环境变量 AJA_DEVICE_IP' : '内置默认'}`);
   DEVICES.forEach((d) => console.log(`  设备 ${d.name}:  http://${d.ip} （英文版，不受影响）`));
   console.log('  Ctrl+C 停止');
 });

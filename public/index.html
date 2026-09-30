@@ -48,9 +48,11 @@
 
   #devbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
   #devbar .lbl { color: var(--dim); font-size: 12.5px; }
+  #devchips { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .devbar-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
   .devchip {
     background: var(--card2); border: 1px solid var(--line); border-radius: 999px;
-    padding: 5px 14px; font-size: 13px; color: var(--dim); cursor: pointer; font-family: inherit;
+    padding: 5px 8px 5px 14px; font-size: 13px; color: var(--dim); cursor: pointer; font-family: inherit;
     display: inline-flex; align-items: center; gap: 7px;
   }
   .devchip:hover { border-color: var(--blue); }
@@ -58,6 +60,56 @@
   .devchip .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
   .devchip .sdot.on { background: var(--green); }
   .devchip .sdot.off { background: var(--red); }
+  .devchip .rm {
+    border: none; background: transparent; color: var(--dim); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 2px 5px; border-radius: 50%; font-family: inherit;
+  }
+  .devchip .rm:hover { color: #ff9a9d; background: #3a1518; }
+
+  .mini.rec { border-color: #7a2126; color: #ff9a9d; }
+  .mini.rec:hover { border-color: var(--red); }
+  .mini.stop { border-color: #2a3a4a; }
+
+  .note {
+    color: var(--dim); font-size: 12px; margin: -4px 0 14px; padding-left: 2px; line-height: 1.6;
+  }
+  .note b { color: var(--text); font-weight: 600; }
+
+  /* 弹窗 */
+  #modal {
+    position: fixed; inset: 0; background: rgba(6, 9, 13, .72); display: none;
+    align-items: center; justify-content: center; z-index: 20; padding: 20px;
+  }
+  #modal.show { display: flex; }
+  .modal-box {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px 16px; width: 100%; max-width: 520px; max-height: 82vh; overflow: auto;
+  }
+  .modal-box h3 { margin: 0 0 12px; font-size: 16px; letter-spacing: .5px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .gangrow {
+    display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line);
+    border-radius: 9px; margin-bottom: 7px; cursor: pointer; font-size: 13.5px;
+  }
+  .gangrow:hover { border-color: var(--blue); }
+  .gangrow input { accent-color: var(--blue); width: 15px; height: 15px; flex: none; }
+  .gangrow .en { margin-left: auto; }
+  .rlist { display: flex; flex-direction: column; gap: 6px; }
+  .rrow { display: flex; align-items: center; gap: 9px; font-size: 13.5px; padding: 7px 10px; border-radius: 9px; background: var(--card2); }
+  .rrow .tag { font-weight: 700; flex: none; }
+  .rrow.ok .tag { color: var(--green); }
+  .rrow.bad .tag { color: #ff9a9d; }
+  .rrow .en { margin-left: auto; text-align: right; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .field > label { color: var(--dim); font-size: 12.5px; }
+  .field input {
+    background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-size: 14px; font-family: inherit; outline: none;
+  }
+  .field input:focus { border-color: var(--blue); }
+  .fmsg { font-size: 12.5px; min-height: 17px; }
+  .fmsg.bad { color: #ff9a9d; }
+  .fmsg.good { color: var(--green); }
 
   #banner {
     display: none; background: #3a1518; border: 1px solid var(--red);
@@ -70,6 +122,8 @@
     background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
   }
   .card .k { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  .card .k small { font-size: 11px; color: #6f7d90; }
+  .card .k[title] { cursor: help; }
   .card .v { font-size: 17px; font-weight: 600; word-break: break-all; }
   .card .v small { color: var(--dim); font-weight: 400; }
   .card.tc { grid-column: span 2; }
@@ -169,7 +223,15 @@
     <a class="english-link" id="english-link" href="#" target="_blank">打开英文原版页面 ↗</a>
   </header>
 
-  <div id="devbar"></div>
+  <div id="devbar">
+    <span id="devchips"></span>
+    <span class="spacer"></span>
+    <span class="devbar-actions">
+      <button class="mini rec" id="btn-gang-rec" type="button">⏺ 全部录制</button>
+      <button class="mini stop" id="btn-gang-stop" type="button">⏹ 全部停止</button>
+      <button class="mini" id="btn-add-dev" type="button">＋ 添加设备</button>
+    </span>
+  </div>
 
   <div id="banner"></div>
 
@@ -177,15 +239,21 @@
     <div class="card tc"><div class="k">时码 TIMECODE</div><div class="v" id="st-timecode">--:--:--:--</div></div>
     <div class="card"><div class="k">走带状态</div><div class="v"><span class="badge" id="st-transport">—</span></div></div>
     <div class="card"><div class="k">视频输入</div><div class="v" id="st-input">—</div></div>
-    <div class="card"><div class="k">录制格式</div><div class="v" id="st-recfmt">—</div></div>
+    <div class="card"><div class="k" title="eParamID_RecordFormat —— 设备侦测值，只读。录制格式跟随 SDI 输入信号。">录制格式<small>（侦测·只读）</small></div><div class="v" id="st-recfmt">—</div></div>
     <div class="card"><div class="k">当前片段</div><div class="v" id="st-clip">—</div></div>
     <div class="card"><div class="k">介质槽</div><div class="v" id="st-slot">—</div></div>
-    <div class="card"><div class="k">介质格式 / 卷名</div><div class="v" id="st-mediafmt">—</div></div>
+    <div class="card"><div class="k" title="eParamID_DetectMediaFormat —— 设备按当前 SDI 输入信号侦测出的介质格式，只读。录像机没有可写的分辨率/帧率参数。">介质格式<small>（跟随输入信号）</small> / 卷名</div><div class="v" id="st-mediafmt">—</div></div>
     <div class="card wide">
       <div class="k">剩余空间</div>
       <div class="v" id="st-avail">—</div>
       <div class="bar"><i id="st-avail-bar" style="width:0%"></i></div>
     </div>
+  </div>
+
+  <div class="note">
+    <b>分辨率 / 帧率在摄像机端决定。</b>Ki Pro 的录制格式<b>跟随 SDI 输入信号</b>——录像机侧只有侦测显示（
+    <code>RecordFormat</code> / <code>DetectMediaFormat</code>，设备参数表中均标记 <code>readonly</code>），
+    <b>没有可写的录制格式参数</b>。要改分辨率/帧率请调摄像机输出，或改 SDI 信号源。
   </div>
 
   <div class="transport">
@@ -256,6 +324,17 @@
     <h2>健康状态 <span class="hint">面板服务 / 各设备在线 / 图片实时导入心跳</span></h2>
     <div id="health-box"><div class="empty">正在读取…</div></div>
   </section>
+</div>
+
+<div id="modal">
+  <div class="modal-box">
+    <h3 id="modal-title">标题</h3>
+    <div id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="mini" id="modal-cancel" type="button">取消</button>
+      <button class="mini primary" id="modal-ok" type="button">确认</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -406,23 +485,75 @@ function setOnline(on, errMsg) {
 }
 
 // 所有请求自动带上当前设备
-async function api(pathname, query) {
+async function api(pathname, query, opts) {
   const qs = new URLSearchParams();
   if (state.currentDev !== null && state.currentDev !== undefined) qs.set('dev', state.currentDev);
-  if (query) Object.entries(query).forEach(([k, v]) => qs.set(k, v));
+  if (query) Object.entries(query).forEach(([k, v]) => { if (v !== undefined && v !== null) qs.set(k, v); });
   const q = qs.toString();
-  const r = await fetch(pathname + (q ? '?' + q : ''));
+  const r = await fetch(pathname + (q ? '?' + q : ''), { method: (opts && opts.method) || 'GET' });
   let data = {};
   try { data = await r.json(); } catch { data = {}; }
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
   return data;
 }
 
+const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// —— 通用弹窗（支持异步确认；确认后可由回调替换正文）——
+let modalState = { onOk: null, busy: false };
+function openModal({ title, bodyHTML, okText, cancelText, onOk }) {
+  modalState = { onOk, busy: false };
+  $('modal-title').textContent = title || '';
+  $('modal-body').innerHTML = bodyHTML || '';
+  $('modal-ok').textContent = okText || '确认';
+  $('modal-ok').style.display = '';
+  $('modal-cancel').textContent = cancelText || '取消';
+  $('modal-cancel').style.display = '';
+  $('modal').classList.add('show');
+}
+function closeModal() { $('modal').classList.remove('show'); }
+function setModalMsg(id, text, bad) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'fmsg' + (bad ? ' bad' : ' good');
+}
+// 把弹窗正文换成结果清单，并把「确认」变成「关闭」
+function modalToResult(html, okLabel) {
+  $('modal-body').innerHTML = html;
+  $('modal-ok').textContent = okLabel || '关闭';
+  $('modal-cancel').style.display = 'none';
+  modalState.onOk = null;
+}
+$('modal-cancel').addEventListener('click', closeModal);
+$('modal-ok').addEventListener('click', async () => {
+  if (modalState.busy) return;
+  if (!modalState.onOk) { closeModal(); return; }
+  modalState.busy = true;
+  $('modal-ok').disabled = true;
+  try {
+    await modalState.onOk();
+  } catch (e) {
+    if ($('modal-msg')) setModalMsg('modal-msg', '失败：' + e.message, true);
+    else toast('失败：' + e.message, false);
+  } finally {
+    modalState.busy = false;
+    $('modal-ok').disabled = false;
+  }
+});
+$('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
+
 // —— 设备栏 ——
 function renderDeviceBar() {
-  const bar = $('devbar');
+  const bar = $('devchips');
   bar.innerHTML = '';
-  if (!state.devices.length) return;
+  if (!state.devices.length) {
+    const lbl = document.createElement('span');
+    lbl.className = 'lbl';
+    lbl.textContent = '设备列表为空 —— 点右侧「＋ 添加设备」，或编辑 devices.txt';
+    bar.appendChild(lbl);
+    return;
+  }
   const lbl = document.createElement('span');
   lbl.className = 'lbl';
   lbl.textContent = state.devices.length > 1 ? '选择设备：' : '当前设备：';
@@ -431,11 +562,18 @@ function renderDeviceBar() {
     const b = document.createElement('button');
     b.className = 'devchip' + (String(d.id) === String(state.currentDev) ? ' on' : '');
     b.type = 'button';
+    b.title = `${d.name} · ${d.ip}${d.product ? ' · ' + d.product : ''}${d.online ? ' · 在线' : ' · 离线'}`;
     const dot = document.createElement('span');
     dot.className = 'sdot ' + (d.online ? 'on' : 'off');
     b.appendChild(dot);
     b.appendChild(document.createTextNode(`${d.name} · ${d.ip}`));
     b.addEventListener('click', () => switchDevice(d.id));
+    const rm = document.createElement('span');
+    rm.className = 'rm';
+    rm.textContent = '×';
+    rm.title = '从设备列表移除（会删掉 devices.txt 对应行）';
+    rm.addEventListener('click', (e) => { e.stopPropagation(); removeDevice(d); });
+    b.appendChild(rm);
     bar.appendChild(b);
   }
   const cur = state.devices.find((d) => String(d.id) === String(state.currentDev));
@@ -450,12 +588,23 @@ function renderDeviceBar() {
 async function loadDevices() {
   try {
     const data = await api('/api/devices');
-    state.devices = data.devices || [];
-    if (state.currentDev === null && state.devices.length) state.currentDev = state.devices[0].id;
-    renderDeviceBar();
+    applyDeviceList(data.devices || []);
   } catch (e) {
     // 设备清单拿不到时保持静默，refreshAll 会给出离线横幅
   }
+}
+
+// 用服务端返回的清单刷新本地状态；当前设备被删掉时自动回退到第一台
+function applyDeviceList(list) {
+  state.devices = list;
+  if (state.currentDev === null && list.length) state.currentDev = list[0].id;
+  if (state.currentDev !== null && !list.some((d) => String(d.id) === String(state.currentDev))) {
+    state.currentDev = list.length ? list[0].id : null;
+    state.params = {};
+    state.options = {};
+    state.optionsName = {};
+  }
+  renderDeviceBar();
 }
 
 async function switchDevice(id) {
@@ -470,6 +619,119 @@ async function switchDevice(id) {
   renderNaming();
   await refreshAll();
   await loadClips();
+}
+
+// ============ F1 添加 / 移除设备 ============
+function openAddDevice() {
+  const nextName = 'AJA' + (state.devices.length + 1);
+  openModal({
+    title: '添加设备（按 IP）',
+    okText: '探测并添加',
+    bodyHTML:
+      `<div class="field"><label>设备名称（可留空，自动命名）</label>` +
+      `<input type="text" id="add-name" maxlength="32" placeholder="${esc(nextName)}" autocomplete="off" spellcheck="false"></div>` +
+      `<div class="field"><label>设备 IP（IPv4）</label>` +
+      `<input type="text" id="add-ip" placeholder="例如 10.10.12.54" autocomplete="off" spellcheck="false"></div>` +
+      `<div class="fmsg" id="add-msg"></div>` +
+      `<div class="en" style="margin-top:4px">添加前会向该 IP <b>只读探测一次</b> eParamID_ProductID，确认是在线的 Ki Pro 才写入 devices.txt。` +
+      `<b>整个流程不会向设备写入任何参数。</b></div>`,
+    onOk: doAddDevice,
+  });
+  const el = $('add-ip');
+  if (el) el.focus();
+}
+
+async function doAddDevice() {
+  const name = ($('add-name')?.value || '').trim();
+  const ip = ($('add-ip')?.value || '').trim();
+  if (!ip) { setModalMsg('add-msg', '请填写设备 IP', true); return; }
+  setModalMsg('add-msg', '正在探测 ' + ip + ' …', false);
+  let res;
+  try {
+    res = await api('/api/devices/add', { name, ip }, { method: 'POST' });
+  } catch (e) {
+    setModalMsg('add-msg', e.message, true);
+    return;
+  }
+  await loadDevices();
+  const newId = res.added ? res.added.id : null;
+  closeModal();
+  toast(`已添加 ${res.added ? res.added.name + '（' + res.added.ip + '）' : ip}${res.product ? ' · ' + res.product : ''}`, true);
+  if (newId !== null) await switchDevice(newId);
+  else await refreshAll();
+}
+
+async function removeDevice(d) {
+  const ok = confirm(
+    `确认从设备列表移除「${d.name}（${d.ip}）」？\n\n` +
+      `将删除 devices.txt 里对应的一行（面板列表与英文页面互不影响，设备本身不受任何影响）。\n` +
+      `如需再加回来，用「＋ 添加设备」重新探测即可。`,
+  );
+  if (!ok) return;
+  try {
+    const res = await api('/api/devices/remove', { target: d.id }, { method: 'POST' });
+    await loadDevices();
+    toast(`已移除 ${res.removed.name}（${res.removed.ip}）`, true);
+  } catch (e) {
+    toast('移除失败：' + e.message, false);
+    return;
+  }
+  await refreshAll();
+  await loadClips();
+}
+
+// ============ F2 一键录制（软 Gang 群发总控）============
+function gangCommand(cmd) {
+  const isRec = cmd === 'record';
+  const label = isRec ? '全部录制' : '全部停止';
+  const online = state.devices.filter((d) => d.online);
+  const offline = state.devices.filter((d) => !d.online);
+  if (!state.devices.length) { toast('设备列表为空，先添加设备', false); return; }
+  if (!online.length) { toast(`没有在线设备，${label}未下发（离线设备不会收到命令）`, false); return; }
+
+  const rows = online
+    .map(
+      (d) =>
+        `<label class="gangrow"><input type="checkbox" value="${esc(d.id)}" checked>` +
+        `<b>${esc(d.name)}</b><span class="en">${esc(d.ip)}${d.product ? ' · ' + esc(d.product) : ''}</span></label>`,
+    )
+    .join('');
+  const offNote = offline.length
+    ? `<div class="en" style="margin-top:6px">离线设备（本次不下发）：${offline.map((d) => esc(d.name) + ' · ' + esc(d.ip)).join('、')}</div>`
+    : '';
+
+  openModal({
+    title: `${label} —— 群发总控`,
+    okText: `确认群发${label}`,
+    bodyHTML:
+      `<div class="en" style="margin-bottom:10px">将对下面勾选的在线设备群发 ` +
+      `<code>eParamID_TransportCommand=${isRec ? 3 : 4}</code>（${isRec ? '录制' : '停止'}）。` +
+      `走带是瞬时命令，不回读校验；<b>逐台回报结果，部分失败不影响其它设备</b>。取消勾选即不参与本次群发。</div>` +
+      `<div id="gang-list">${rows}</div>` +
+      `<div class="fmsg" id="gang-msg"></div>` + offNote,
+    onOk: async () => {
+      const ids = Array.from(document.querySelectorAll('#gang-list input[type=checkbox]:checked')).map((i) => i.value);
+      if (!ids.length) { setModalMsg('gang-msg', '请至少勾选一台设备', true); return; }
+      setModalMsg('gang-msg', `正在向 ${ids.length} 台设备群发${label} …`, false);
+      const res = await api('/api/gang', { cmd, devs: ids.join(',') }, { method: 'POST' });
+      const rowsHtml = res.results
+        .map(
+          (r) =>
+            `<div class="rrow ${r.ok ? 'ok' : 'bad'}"><span class="tag">${r.ok ? '✔ 成功' : '✘ 失败'}</span>` +
+            `<b>${esc(r.name)}</b><span class="en">${esc(r.ip)}${r.ok ? (r.returned ? ' · 设备回执 ' + esc(r.returned) : '') : ' · ' + esc(r.error || '未知错误')}</span></div>`,
+        )
+        .join('');
+      modalToResult(
+        `<div class="en" style="margin-bottom:10px">${label}群发完成：` +
+          `<b>成功 ${res.ok_count} 台</b>${res.fail_count ? `，<span style="color:#ff9a9d">失败 ${res.fail_count} 台</span>` : ''}` +
+          `（共 ${res.total} 台）。</div><div class="rlist">${rowsHtml}</div>`,
+        '关闭',
+      );
+      if (res.fail_count) toast(`群发${label}：成功 ${res.ok_count} 台，失败 ${res.fail_count} 台`, false);
+      else toast(`群发${label}：${res.ok_count} 台全部成功`, true);
+      await refreshAll();
+    },
+  });
 }
 
 // —— 状态区 ——
@@ -889,6 +1151,9 @@ async function refreshAll() {
 buildConfigDOM();
 buildNamingDOM();
 $('btn-clips').addEventListener('click', loadClips);
+$('btn-add-dev').addEventListener('click', openAddDevice);
+$('btn-gang-rec').addEventListener('click', () => gangCommand('record'));
+$('btn-gang-stop').addEventListener('click', () => gangCommand('stop'));
 $('auto-refresh').addEventListener('change', () => {});
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) refreshAll(); }, 3000);
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) loadClips(); }, 20000);
