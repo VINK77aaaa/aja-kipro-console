@@ -1,8 +1,0 @@
-# 个人素材与运行产物，不入库
-图片/
-监视日志.txt
-__pycache__/
-*.pyc
-.watcher-status.json
-.watcher-status.json.tmp
-.watcher.lock
