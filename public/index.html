@@ -183,6 +183,7 @@
   .cfg select:focus, .cfg input:focus { border-color: var(--blue); }
   .cfg select:disabled, .cfg input:disabled { opacity: .45; }
   .cfg .en { color: var(--dim); font-size: 11.5px; min-height: 15px; }
+  .cfg .en.warn { color: var(--amber); }
   .cfg .ro { font-size: 17px; font-weight: 600; padding: 5px 0; }
 
   table.clips { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -479,29 +480,45 @@ const TRANSPORT_CN = {
 };
 
 // ============ 面板配置 ============
+// mode 字段 = 该参数在设备固件里声明的适用模式，依据是设备 /desc.json 的 relations：
+//   eParamID_EncodeChannels：0 = 多通道（Multi Channel）/ 1 = 单通道（Single Channel）
+//     多通道专属 → disabled_by EncodeChannels==1
+//     单通道专属 → disabled_by EncodeChannels==0
+//   例：ChannelsToRecord / AudioInSelectCh1-4 / SDIMonitorChannel … 都是 disabled_by 1（多通道专属）
+//       VideoInSelect / AudioInSelect / EncodeType_Low_FR     … 都是 disabled_by 0（单通道专属）
+// 设备自己的网页也是这么分的：状态页里 .multiChnl / .singleChnl 两组行按模式整行显示或隐藏
+//（见 /js/kipro.common.js 的 update_encode_chnls_params）。
+// 面板**不隐藏、只置灰并写明原因** —— 免得用户以为功能丢了，也避免向设备下发一个它根本不认的值。
 const CONFIG_GROUPS = [
   { title: '录制与编码', items: [
     { p: 'eParamID_MediaState',         label: '介质状态' },
-    { p: 'eParamID_EncodeChannels',     label: '编码通道' },
-    { p: 'eParamID_ChannelsToRecord',   label: '录制通道数' },
+    { p: 'eParamID_EncodeChannels',     label: '编码通道', hint: '单通道 / 多通道的总开关' },
+    { p: 'eParamID_ChannelsToRecord',   label: '录制通道数', mode: 'multi' },
     { p: 'eParamID_FileFormat',         label: '文件封装' },
-    { p: 'eParamID_EncodeType_MultiChnl_Ch1', label: '通道 1 编码' },
-    { p: 'eParamID_EncodeType_MultiChnl_Ch2', label: '通道 2 编码' },
-    { p: 'eParamID_EncodeType_MultiChnl_Ch3', label: '通道 3 编码' },
-    { p: 'eParamID_EncodeType_MultiChnl_Ch4', label: '通道 4 编码' },
+    { p: 'eParamID_EncodeType',              label: '编码类型（单通道）', mode: 'single' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch1', label: '通道 1 编码', mode: 'multi' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch2', label: '通道 2 编码', mode: 'multi' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch3', label: '通道 3 编码', mode: 'multi' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch4', label: '通道 4 编码', mode: 'multi' },
+  ]},
+  { title: '视频输入', items: [
+    { p: 'eParamID_VideoInSelect',          label: '视频输入源（单通道）', mode: 'single' },
+    { p: 'eParamID_VideoInSelectMultiChnl', label: '视频输入源（多通道）', mode: 'multi' },
+    { p: 'eParamID_DetectInputTSIFormat',   label: '图像分割', mode: 'single', readonly: true },
   ]},
   { title: '音频', items: [
     { p: 'eParamID_AudioChannels',           label: '音频通道数' },
-    { p: 'eParamID_AudioInSelectCh1',        label: '通道 1 音频输入' },
-    { p: 'eParamID_AudioInSelectCh2',        label: '通道 2 音频输入' },
-    { p: 'eParamID_AudioInSelectCh3',        label: '通道 3 音频输入' },
-    { p: 'eParamID_AudioInSelectCh4',        label: '通道 4 音频输入' },
-    { p: 'eParamID_AudioEncodeChannelFocus', label: '耳机监听通道' },
+    { p: 'eParamID_AudioInSelect',           label: '音频输入（单通道）', mode: 'single' },
+    { p: 'eParamID_AudioInSelectCh1',        label: '通道 1 音频输入', mode: 'multi' },
+    { p: 'eParamID_AudioInSelectCh2',        label: '通道 2 音频输入', mode: 'multi' },
+    { p: 'eParamID_AudioInSelectCh3',        label: '通道 3 音频输入', mode: 'multi' },
+    { p: 'eParamID_AudioInSelectCh4',        label: '通道 4 音频输入', mode: 'multi' },
+    { p: 'eParamID_AudioEncodeChannelFocus', label: '耳机监听通道', mode: 'multi' },
   ]},
   { title: '播放与输出', items: [
     { p: 'eParamID_PlayMedia',          label: '播放介质' },
-    { p: 'eParamID_SDIMonitorChannel',  label: 'SDI 监视通道' },
-    { p: 'eParamID_HDMIOutChannel',     label: 'HDMI 输出通道' },
+    { p: 'eParamID_SDIMonitorChannel',  label: 'SDI 监视通道', mode: 'multi' },
+    { p: 'eParamID_HDMIOutChannel',     label: 'HDMI 输出通道', mode: 'multi' },
   ]},
 ];
 
@@ -943,6 +960,12 @@ function buildConfigDOM() {
       div.className = 'cfg';
       const lab = document.createElement('label');
       lab.textContent = item.label;
+      if (item.hint) {
+        const h = document.createElement('small');
+        h.className = 'hint';
+        h.textContent = ' ' + item.hint;
+        lab.appendChild(h);
+      }
       const sel = document.createElement('select');
       sel.id = 'cfg-' + item.p;
       sel.disabled = true;
@@ -973,6 +996,22 @@ async function loadOptions(item) {
   renderConfigSelect(item);
 }
 
+// —— 单通道 / 多通道 互斥 ——
+// 依据设备固件在描述表里声明的 disabled_by 关系（见 CONFIG_GROUPS 上方注释）。
+function currentEncodeMode() {
+  const p = state.params['eParamID_EncodeChannels'];
+  return p ? String(p.value) : null;
+}
+
+// 返回「这一项现在为什么不能改」；适用则返回 null
+function modeBlocked(item) {
+  const m = currentEncodeMode();
+  if (m === null || !item.mode) return null; // 模式未知 / 通用项 → 不拦
+  if (item.mode === 'multi' && m === '1') return '仅多通道模式可用（当前为单通道）';
+  if (item.mode === 'single' && m === '0') return '仅单通道模式可用（当前为多通道）';
+  return null;
+}
+
 function renderConfigSelect(item) {
   const sel = $('cfg-' + item.p);
   if (!sel) return;
@@ -981,6 +1020,8 @@ function renderConfigSelect(item) {
   const opts = state.options[item.p];
   if (!cur) { sel.disabled = true; return; }
 
+  const blocked = modeBlocked(item);
+  const curText = '当前：' + (cur.value_name || cur.value);
   const list = opts || [{ value: cur.value, text: cur.value_name || cur.value }];
   const focused = document.activeElement === sel;
   sel.innerHTML = '';
@@ -991,15 +1032,25 @@ function renderConfigSelect(item) {
     if (String(o.value) === String(cur.value)) op.selected = true;
     sel.appendChild(op);
   }
-  if (!opts) {
-    // 选项表拿不到时只读显示当前值
-    sel.disabled = true;
-    if (en) en.textContent = '';
-  } else {
-    sel.disabled = !state.online;
-    if (en) en.textContent = list.find((o) => String(o.value) === String(cur.value))
-      ? '当前：' + (cur.value_name || cur.value)
-      : '当前值不在选项列表中（' + (cur.value_name || cur.value) + '）';
+  // 置灰优先级：模式不符 > 只读 > 离线 > 选项表拿不到
+  sel.disabled = !!blocked || !!item.readonly || !state.online || !opts;
+  if (en) {
+    if (blocked) {
+      // 模式不符是「当下为什么用不了」；只读是永久属性 —— 两条都成立时一起说明，免得误导
+      en.className = 'en warn';
+      en.textContent = `${curText}　⚠ ${blocked}${item.readonly ? '；且为设备侦测值，只读' : ''}`;
+    } else if (item.readonly) {
+      en.className = 'en';
+      en.textContent = `${curText}（设备侦测，只读）`;
+    } else if (!opts) {
+      en.className = 'en';
+      en.textContent = '';
+    } else {
+      en.className = 'en';
+      en.textContent = list.find((o) => String(o.value) === String(cur.value))
+        ? curText
+        : `当前值不在选项列表中（${cur.value_name || cur.value}）`;
+    }
   }
   if (focused) sel.focus();
 }
@@ -1007,6 +1058,8 @@ function renderConfigSelect(item) {
 async function onConfigChange(item, sel) {
   const cur = state.params[item.p];
   if (!cur) return;
+  const blocked = modeBlocked(item);
+  if (blocked) { sel.value = cur.value; toast(`未下发：「${item.label}」${blocked}`, false); return; }
   const oldValue = cur.value;
   const newValue = sel.value;
   if (String(newValue) === String(oldValue)) return;

@@ -156,6 +156,7 @@ const BATCH_PARAMS = [
   'eParamID_EncodeChannels',
   'eParamID_ChannelsToRecord',
   'eParamID_FileFormat',
+  'eParamID_EncodeType', // 单通道编码类型（设备映射到 EncodeType_Low_FR / _High_FR）
   'eParamID_EncodeType_MultiChnl_Ch1',
   'eParamID_EncodeType_MultiChnl_Ch2',
   'eParamID_EncodeType_MultiChnl_Ch3',
@@ -169,6 +170,11 @@ const BATCH_PARAMS = [
   'eParamID_PlayMedia',
   'eParamID_SDIMonitorChannel',
   'eParamID_HDMIOutChannel',
+  // 视频输入源：单通道 / 多通道各一个（设备固件按 EncodeChannels 互斥，见 index.html 的 CONFIG_GROUPS）
+  'eParamID_VideoInSelect',
+  'eParamID_VideoInSelectMultiChnl',
+  'eParamID_AudioInSelect',
+  'eParamID_DetectInputTSIFormat',
   // 拍摄前命名（P1）
   'eParamID_UseCustomClipName',
   'eParamID_CustomClipName',
