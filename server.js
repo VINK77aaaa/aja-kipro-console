@@ -298,6 +298,224 @@ async function probeForAdd(ip) {
   }
 }
 
+// ==================== 告警（Alarms）====================
+// 设备的告警参数是 **protobuf 二进制**，不是普通 JSON —— 通用读取器读不懂，所以这里单独解码。
+// schema 来自设备自带（可直接 GET http://<设备IP>/alarm.proto 与 /error.proto）：
+//   message Alarm {
+//     enum State    { NORMAL = 0; ALARM = 1; }
+//     enum Severity { WARNING = 0; ERROR = 1; FATAL = 2; }
+//     required State    state    = 1;   // varint
+//     optional Severity severity = 2;   // varint（静态属性，NORMAL 时也存在）
+//     repeated Error    error    = 3;   // { string text = 1; string short_text = 2; }
+//   }
+// 读取：GET /config?action=get&paramid=eParamID_XXX_Alarm → value 是 base64 protobuf。
+// 本模块**只读**，不向设备写任何参数。
+
+const SEVERITY_CN = ['警告', '错误', '严重'];
+const SEVERITY_KEY = ['WARNING', 'ERROR', 'FATAL'];
+
+// param_id → [中文名, 中文说明]。名称/说明来自设备英文原文，逐条对照翻译。
+// 设备在告警抬升时可能追加更详细的 error 文案（例如 No SDI input detected），
+// 那些原文会一并展示，不丢信息。
+const ALARM_CN = {
+  // ---- 严重 FATAL ----
+  eParamID_Fan_Stopped_Alarm: ['风扇停转', '设备散热风扇停止工作，请立即停机检查'],
+  // ---- 错误 ERROR ----
+  eParamID_2_Channel_Format_Alarm: ['声道格式冲突', '2.1 音频输入与 2.3 音频通道设置互相冲突'],
+  eParamID_AV_Mismatch_Alarm: ['音视频不匹配', '音频与视频格式不匹配'],
+  eParamID_Media_Damaged_Alarm: ['介质损坏', '请备份数据后重新格式化介质'],
+  eParamID_Change_Encode_Mode_Alarm: ['请更改编码模式', '当前设置下该编码模式不可用'],
+  eParamID_HQ_Not_Supported_Alarm: ['请更改编码类型', '当前输入不支持所选编码类型'],
+  eParamID_BitRate_Not_Compatible_Alarm: ['请更改编码类型', '码率与当前设置不兼容'],
+  eParamID_Genlock_Mismatch_Alarm: ['同步信号不匹配', 'Genlock 参考信号与输入不匹配'],
+  eParamID_Invalid_Selection_Alarm: ['选择无效', '当前参数组合无效'],
+  eParamID_MXF_Record_Inhibited_Alarm: ['选择无效', '当前选择下 MXF 无法录制'],
+  eParamID_Media_Full_Alarm: ['介质已满', '存储介质空间已满'],
+  eParamID_Name_In_Use_Alarm: ['名称已被占用', '设备名称与其他设备冲突'],
+  eParamID_No_Media_Installed_Alarm: ['未安装介质', '未检测到存储介质'],
+  eParamID_No_Rollover_Alarm: ['无法接力录制', '没有可接力的第二块介质'],
+  eParamID_Non_VFR_Format_Alarm: ['非 VFR 格式', '当前为固定帧率格式'],
+  eParamID_Record_Format_Alarm: ['录制格式问题', '当前录制格式不可用'],
+  eParamID_SDI_VFR_Mismatch_Alarm: ['SDI VFR 不匹配', 'SDI 输入与 VFR 设置不匹配'],
+  eParamID_Storage_Removed_Alarm: ['介质已拔出', '存储介质已被移除'],
+  eParamID_SW_Error_Alarm: ['软件错误', '设备软件发生错误'],
+  eParamID_Turn_Off_Camera_Data_Alarm: ['请关闭摄像机数据', '请关闭摄像机数据输出'],
+  eParamID_Unsupported_Media_4KP60HQ_Alarm: ['介质不支持', '介质不支持当前音视频格式'],
+  // ---- 警告 WARNING ----
+  eParamID_Max_Clips_Alarm: ['片段数达显示上限', '片段数量超过界面显示上限'],
+  eParamID_Dropped_Frames_Alarm: ['丢帧', '播放或录制过程中出现丢帧'],
+  eParamID_Frame_Skipped_Alarm: ['跳帧', '出现跳帧'],
+  eParamID_Genlock_Missing_Alarm: ['缺少同步信号', '未检测到 Genlock 参考信号'],
+  eParamID_Infinite_Record_Alarm: ['已启用无限录制', '无限录制会在接力前格式化第二块硬盘，将导致数据丢失'],
+  eParamID_Input_Error_Alarm: ['输入错误', '输入信号异常'],
+  eParamID_Interval_Record_Enabled_Alarm: ['已启用间隔录制', '间隔录制已开启'],
+  eParamID_ProRes_MultiChnl_Record_Format_Alarm: ['ProRes 多通道格式无效', '多通道录制格式无效'],
+  eParamID_Input_Format_Changed_Alarm: ['视频信号丢失', '输入视频信号曾中断'],
+  eParamID_Media_Low_Alarm: ['介质空间不足', '存储介质剩余空间偏低'],
+  eParamID_Media_Unformatted_Alarm: ['介质未格式化', '存储介质未格式化'],
+  eParamID_Near_Over_Temp_Alarm: ['温度偏高', '设备温度接近上限，请检查散热'],
+  eParamID_Near_Over_Volt_Alarm: ['电压偏高', '输入电压接近上限'],
+  eParamID_Near_Under_Volt_Alarm: ['电压偏低', '输入电压接近下限'],
+  eParamID_No_Clip_Name_Alarm: ['缺少片段名', '未设置片段名'],
+  eParamID_No_Video_Input_Alarm: ['无视频输入', '未检测到 SDI 输入信号'],
+  eParamID_Output_Error_Alarm: ['输出错误', '输出信号异常'],
+  eParamID_PS_1_OFF_Alarm: ['电源 1 关闭', '1 号电源模块未工作'],
+  eParamID_PS_2_OFF_Alarm: ['电源 2 关闭', '2 号电源模块未工作'],
+  eParamID_Record_Inhibited_Alarm: ['录制被禁止', '当前状态下无法录制'],
+  eParamID_Rollover_Media_Full_Alarm: ['接力介质已满', '第二块介质空间已满'],
+  eParamID_Rollover_Media_Low_Alarm: ['接力介质空间不足', '第二块介质剩余空间偏低'],
+  eParamID_Rollover_Media_Unformatted_Alarm: ['接力介质未格式化', '第二块介质未格式化'],
+  eParamID_Rollover_Media_Not_Empty_Alarm: ['接力介质非空', '第二块介质上已有数据'],
+  eParamID_Safe_Boot_Mode_Alarm: ['安全启动模式', '设备处于安全启动模式'],
+  eParamID_Safeboot_Alarm: ['安全启动', '正在运行安全启动（备份）版本固件'],
+  eParamID_Rollover_Unsupported_Media_4KP60HQ_Alarm: ['接力介质不支持', '第二块介质不支持当前音视频格式'],
+};
+
+// desc.json 取不到时的兜底参数表（与上表同源）
+const ALARM_FALLBACK_IDS = Object.keys(ALARM_CN);
+
+// 每个设备只取一次 desc.json，之后复用（进程内缓存）
+const alarmIdCache = new Map();
+
+// 极简 protobuf 解码：只处理 varint(0) 与 length-delimited(2)，够用
+function decodeProtoFields(buf) {
+  const out = [];
+  let i = 0;
+  while (i < buf.length) {
+    let key = 0;
+    let shift = 0;
+    for (;;) {
+      if (i >= buf.length) return out;
+      const b = buf[i++];
+      key |= (b & 0x7f) << shift;
+      if (!(b & 0x80)) break;
+      shift += 7;
+      if (shift > 35) return out;
+    }
+    const field = key >> 3;
+    const wire = key & 7;
+    if (wire === 0) {
+      let v = 0;
+      let s = 0;
+      for (;;) {
+        if (i >= buf.length) return out;
+        const b = buf[i++];
+        v |= (b & 0x7f) << s;
+        if (!(b & 0x80)) break;
+        s += 7;
+        if (s > 35) return out;
+      }
+      out.push({ field, wire, value: v });
+    } else if (wire === 2) {
+      let len = 0;
+      let s = 0;
+      for (;;) {
+        if (i >= buf.length) return out;
+        const b = buf[i++];
+        len |= (b & 0x7f) << s;
+        if (!(b & 0x80)) break;
+        s += 7;
+        if (s > 35) return out;
+      }
+      out.push({ field, wire, raw: buf.subarray(i, i + len) });
+      i += len;
+    } else if (wire === 5) {
+      i += 4;
+    } else if (wire === 1) {
+      i += 8;
+    } else {
+      return out; // 未知 wire type，放弃剩余部分
+    }
+  }
+  return out;
+}
+
+// base64 → { state, severity, errors: [{text, short}] }
+function parseAlarmValue(b64) {
+  const r = { state: 0, severity: 0, errors: [] };
+  if (typeof b64 !== 'string' || !b64) return r;
+  let buf;
+  try {
+    buf = Buffer.from(b64, 'base64');
+  } catch {
+    return r;
+  }
+  for (const f of decodeProtoFields(buf)) {
+    if (f.field === 1 && f.wire === 0) r.state = f.value;
+    else if (f.field === 2 && f.wire === 0) r.severity = f.value;
+    else if (f.field === 3 && f.wire === 2) {
+      const e = { text: '', short: '' };
+      for (const g of decodeProtoFields(f.raw)) {
+        if (g.field === 1) e.text = g.raw.toString('utf8');
+        else if (g.field === 2) e.short = g.raw.toString('utf8');
+      }
+      if (e.text) r.errors.push(e);
+    }
+  }
+  return r;
+}
+
+// 从设备 desc.json 里取「class_names 含 alarm 的 data 型参数」，取不到则用内置表
+async function getAlarmParamIds(device) {
+  const key = device.ip;
+  if (alarmIdCache.has(key)) return alarmIdCache.get(key);
+  let list = null;
+  try {
+    const r = await deviceGet(device, '/desc.json');
+    const arr = JSON.parse(r.body);
+    if (Array.isArray(arr)) {
+      list = arr
+        .filter(
+          (x) =>
+            x &&
+            x.param_type === 'data' &&
+            Array.isArray(x.class_names) &&
+            x.class_names.includes('alarm') &&
+            validParamName(x.param_id),
+        )
+        .map((x) => x.param_id);
+    }
+  } catch {
+    list = null;
+  }
+  if (!list || !list.length) list = ALARM_FALLBACK_IDS.slice();
+  alarmIdCache.set(key, list);
+  return list;
+}
+
+// 并发读取全部告警参数并解码，返回 { total, raised, worst }
+async function fetchAlarms(device) {
+  const ids = await getAlarmParamIds(device);
+  const results = await mapWithConcurrency(ids, 8, async (id) => {
+    const r = await deviceGet(device, `/config?action=get&paramid=${id}`);
+    const j = parseParamJson(r.body);
+    if (!j || typeof j.value !== 'string') return null;
+    const a = parseAlarmValue(j.value);
+    const cn = ALARM_CN[id] || [id.replace(/^eParamID_|_Alarm$/g, ''), ''];
+    return {
+      id,
+      cn: cn[0],
+      cn_hint: cn[1],
+      en: id.replace(/^eParamID_|_Alarm$/g, '').replace(/_/g, ' '),
+      state: a.state,
+      severity: a.severity,
+      severity_cn: SEVERITY_CN[a.severity] || String(a.severity),
+      severity_key: SEVERITY_KEY[a.severity] || 'WARNING',
+      texts: a.errors.map((e) => e.text).filter(Boolean),
+    };
+  });
+  const all = results.filter(Boolean);
+  const raised = all.filter((a) => a.state === 1);
+  const worst = raised.reduce((m, a) => Math.max(m, a.severity), -1);
+  return {
+    total: all.length,
+    raised_count: raised.length,
+    worst: worst < 0 ? 'NORMAL' : SEVERITY_KEY[worst],
+    worst_cn: worst < 0 ? '正常' : SEVERITY_CN[worst],
+    raised,
+  };
+}
+
 // ==================== 服务 ====================
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -508,6 +726,26 @@ const server = http.createServer(async (req, res) => {
         devices: devs,
       });
       log('HEALTH');
+      return;
+    }
+
+    // 告警：并发读全部 alarm 参数并解码 protobuf，只回「正在报的」+ 汇总
+    // 只读接口，不写任何设备参数。
+    if (p === '/api/alarms') {
+      const dev = resolveDevice(u.searchParams.get('dev'));
+      if (!dev) return sendJson(res, 400, { error: '未知设备' });
+      try {
+        const out = await fetchAlarms(dev);
+        sendJson(res, 200, {
+          device_id: dev.id,
+          device_name: dev.name,
+          ip: dev.ip,
+          ...out,
+        });
+      } catch (e) {
+        sendJson(res, 502, { error: `读取告警失败：${String((e && e.message) || e)}` });
+      }
+      log('ALARMS');
       return;
     }
 

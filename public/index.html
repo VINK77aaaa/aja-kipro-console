@@ -220,6 +220,19 @@
 
   .updated { color: var(--dim); font-size: 11.5px; }
   .dirty { color: var(--amber); font-size: 12px; }
+
+  .alarm-ok { display: flex; align-items: center; gap: 9px; color: var(--green); font-size: 13.5px; padding: 4px 0; }
+  .alarm-ok .adot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex: none; }
+  .alarm-row { display: flex; align-items: flex-start; gap: 11px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .alarm-row:first-child { border-top: none; padding-top: 2px; }
+  .alarm-sev { flex: none; border-radius: 6px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; margin-top: 1px; white-space: nowrap; }
+  .alarm-sev.warn { background: #3a2c10; color: #ffd07a; }
+  .alarm-sev.err { background: #3d2412; color: #ffab6b; }
+  .alarm-sev.fatal { background: #4a1417; color: #ff7d81; }
+  .alarm-body { flex: 1; min-width: 0; }
+  .alarm-name { font-size: 13.5px; font-weight: 600; }
+  .alarm-desc { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+  .alarm-raw { color: #6f7d90; font-size: 11.5px; margin-top: 3px; font-family: var(--mono); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -262,6 +275,11 @@
       <div class="bar"><i id="st-avail-bar" style="width:0%"></i></div>
     </div>
   </div>
+
+  <section class="block" id="alarm-block">
+    <h2>告警 <span class="hint" id="alarm-hint">读自设备 Alarms 系统（只读，不向设备写任何参数）</span></h2>
+    <div id="alarm-box"><div class="empty">读取中…</div></div>
+  </section>
 
   <div class="transport">
     <button class="tbtn" id="btn-prev"><span class="ic">⏮</span>上一片段</button>
@@ -1176,6 +1194,78 @@ async function loadHealth() {
   }
 }
 
+// —— 告警（只读）——
+// 设备告警是 protobuf 二进制，由 server.js 的 /api/alarms 解码后返回结构化 JSON。
+// 这里只负责展示：中文名 + 中文说明 + 设备原文（原文一并保留，不丢信息）。
+let alarmsBusy = false;
+
+function alarmRow(sev, sevCn, name, desc, raw) {
+  const row = document.createElement('div');
+  row.className = 'alarm-row';
+  const s = document.createElement('span');
+  s.className = 'alarm-sev ' + sev;
+  s.textContent = sevCn;
+  const body = document.createElement('div');
+  body.className = 'alarm-body';
+  const n = document.createElement('div');
+  n.className = 'alarm-name';
+  n.textContent = name;
+  body.appendChild(n);
+  if (desc) {
+    const d = document.createElement('div');
+    d.className = 'alarm-desc';
+    d.textContent = desc;
+    body.appendChild(d);
+  }
+  if (raw) {
+    const r = document.createElement('div');
+    r.className = 'alarm-raw';
+    r.textContent = '设备原文：' + raw;
+    body.appendChild(r);
+  }
+  row.appendChild(s);
+  row.appendChild(body);
+  return row;
+}
+
+async function loadAlarms() {
+  if (alarmsBusy) return;
+  alarmsBusy = true;
+  const box = $('alarm-box');
+  const hint = $('alarm-hint');
+  try {
+    const a = await api('/api/alarms');
+    box.innerHTML = '';
+    if (!a.raised_count) {
+      const ok = document.createElement('div');
+      ok.className = 'alarm-ok';
+      const dot = document.createElement('span');
+      dot.className = 'adot';
+      ok.appendChild(dot);
+      ok.appendChild(document.createTextNode(`全部正常 —— 已检查 ${a.total} 项告警，无异常`));
+      box.appendChild(ok);
+      hint.textContent = `读自设备 Alarms 系统（只读，不向设备写任何参数）· 已检查 ${a.total} 项`;
+      return;
+    }
+    const list = a.raised.slice().sort((x, y) => y.severity - x.severity);
+    for (const r of list) {
+      const sev = r.severity_key === 'FATAL' ? 'fatal' : r.severity_key === 'ERROR' ? 'err' : 'warn';
+      const raw = (r.texts || []).filter((t) => t && t !== r.cn).join(' · ');
+      box.appendChild(alarmRow(sev, r.severity_cn, r.cn, r.cn_hint, raw));
+    }
+    hint.textContent = `共 ${a.raised_count} 条（最高级别：${a.worst_cn}）· 已检查 ${a.total} 项 · 只读`;
+  } catch (e) {
+    box.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = '读取告警失败：' + e.message;
+    box.appendChild(d);
+    hint.textContent = '读自设备 Alarms 系统（只读，不向设备写任何参数）';
+  } finally {
+    alarmsBusy = false;
+  }
+}
+
 // —— 主刷新 ——
 async function refreshAll() {
   if (state.refreshing) return;
@@ -1185,6 +1275,7 @@ async function refreshAll() {
     state.params = data.params;
     setOnline(true);
     renderStatus();
+    loadAlarms();
     const allItems = CONFIG_GROUPS.flatMap((g) => g.items).concat(NAMING_FIELDS);
     await Promise.all(allItems.map(loadOptions));
     allItems.forEach(renderConfigSelect);
