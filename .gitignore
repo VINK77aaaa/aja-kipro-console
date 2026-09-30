@@ -3,3 +3,6 @@
 监视日志.txt
 __pycache__/
 *.pyc
+.watcher-status.json
+.watcher-status.json.tmp
+.watcher.lock

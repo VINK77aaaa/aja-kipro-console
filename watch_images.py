@@ -14,10 +14,14 @@
   等你在时间线上删掉对应片段后会自动归档清理
 - 正在复制中的文件会等复制完成（大小稳定）才处理
 - 达芬奇没开或没进入项目时会自动等待，图片排队，进入项目后自动补导入
+- 单实例保护：重复启动会自动退出（占用本机回环端口 8322 当锁）
+- 每轮写心跳到同目录 .watcher-status.json，供 AJA 中文控制台的「健康状态」区读取
 - 详细日志写在同目录下的"监视日志.txt"
 """
+import json
 import os
 import re
+import socket
 import time
 import traceback
 
@@ -31,9 +35,12 @@ POLL_INTERVAL = 2        # 每隔几秒扫一次文件夹
 MAX_TIMELINE_ITEMS = 16  # 时间线上最多保留多少张自动导入的图片，超过自动删最旧的（0 = 不限制）
 ARCHIVE_FOLDER = os.path.join(os.path.expanduser("~"), "Desktop", "调试静帧存档")
 FUSION_DLL = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
+SINGLE_INSTANCE_PORT = 8322  # 单实例锁用的本机端口（重复启动第二个监视器会自动退出）
 # ================================================
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "监视日志.txt")
+# 心跳状态文件：供中文控制台的「健康状态」区读取（只写状态，不参与业务）
+STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".watcher-status.json")
 EXTS = tuple(e.lower() for e in IMAGE_EXTS)
 
 _WATCH_NORM = os.path.normcase(os.path.normpath(IMAGE_FOLDER)) + os.sep
@@ -189,12 +196,25 @@ def pool_referenced_paths(project):
 
 
 def archive_files(files):
-    """把文件移动到归档文件夹（重名自动加序号），返回 [(旧路径, 新路径), ...]"""
+    """把文件移动到归档文件夹（重名自动加序号）。
+
+    返回 (moved, failures)：
+      moved    = [(旧路径, 新路径), ...]  成功归档的
+      failures = [(旧路径, 原因), ...]    未归档的（含"文件已不存在"与"被占用"两类）
+    注意：失败原因必须由调用方区分——"文件已不存在"不能拿去导入，否则会白跑重试。
+    """
     if not files:
-        return []
-    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+        return [], []
+    try:
+        os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+    except OSError as e:
+        return [], [(f, "无法创建归档文件夹：%s" % e) for f in files]
     moved = []
+    failures = []
     for src in files:
+        if not os.path.exists(src):
+            failures.append((src, "文件已不存在"))
+            continue
         dest = os.path.join(ARCHIVE_FOLDER, os.path.basename(src))
         try:
             if os.path.exists(dest):
@@ -206,8 +226,33 @@ def archive_files(files):
             os.replace(src, dest)
             moved.append((src, dest))
         except OSError as e:
-            log("归档失败 %s：%s" % (os.path.basename(src), e))
-    return moved
+            failures.append((src, str(e)))
+    return moved, failures
+
+
+def write_status(connected, project_name, pending_n, deferred_n, seen_n, started_ts):
+    """写心跳状态文件（原子写），供中文控制台健康页读取。失败不影响主流程。"""
+    data = {
+        "pid": os.getpid(),
+        "started_at": int(started_ts),
+        "last_beat": int(time.time()),
+        "watching": IMAGE_FOLDER,
+        "archive": ARCHIVE_FOLDER,
+        "max_timeline": MAX_TIMELINE_ITEMS,
+        "poll_interval": POLL_INTERVAL,
+        "connected": bool(connected),
+        "project": project_name or "",
+        "pending": int(pending_n),
+        "deferred": int(deferred_n),
+        "processed": int(seen_n),
+    }
+    try:
+        tmp = STATUS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, STATUS_FILE)
+    except Exception:
+        pass
 
 
 def timeline_stills(timeline):
@@ -266,6 +311,21 @@ def trim_timeline(project, timeline):
 
 
 def main():
+    # 单实例保护：占用本机回环端口当锁。端口随进程释放，不会留下"僵尸锁"。
+    lock = None
+    try:
+        lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lock.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        lock.listen(1)
+    except OSError:
+        try:
+            if lock:
+                lock.close()
+        except Exception:
+            pass
+        log("已有监视器在运行（端口 %d 被占用），本实例直接退出。" % SINGLE_INSTANCE_PORT)
+        return
+
     os.makedirs(IMAGE_FOLDER, exist_ok=True)
     log("实时导入已启动，监视文件夹：" + IMAGE_FOLDER)
     log("新图片会先归档到 %s 再导入达芬奇，监视文件夹保持干净。" % ARCHIVE_FOLDER)
@@ -274,21 +334,32 @@ def main():
             % MAX_TIMELINE_ITEMS)
     log("关闭本窗口即停止监视。")
 
-    seen = set()      # 已处理完的图片（跳过或导入失败放弃的），防止重复处理
-    sizes = {}        # 正在等大小稳定的新文件
-    pending = []      # 已归档、等待导入达芬奇的文件
-    deferred = set()  # 还在被时间线引用、等片段删除后自动归档的图片
+    started_ts = time.time()
+    seen = set()        # 已处理完的图片（跳过或导入失败放弃的），防止重复处理
+    sizes = {}          # 正在等大小稳定的新文件
+    pending = []        # 已归档、等待导入达芬奇的文件
+    deferred = set()    # 还在被时间线引用、等片段删除后自动归档的图片
+    archive_retry = {}  # 归档重试计数（文件被占用时用，避免刷日志/无限重试）
     fail_count = 0
     last_wait_log = 0.0
     was_connected = False
 
     while True:
+        project_name = ""
+        connected = False
+        sleep_for = POLL_INTERVAL
         try:
             now_files = list_images()
 
             # ---------- 连接达芬奇 ----------
             resolve = get_resolve()
             project = resolve.GetProjectManager().GetCurrentProject() if resolve else None
+            connected = project is not None
+            if connected:
+                try:
+                    project_name = project.GetName()
+                except Exception:
+                    project_name = ""
 
             if project is not None and not was_connected:
                 log("已连接到达芬奇，当前项目：" + project.GetName())
@@ -327,16 +398,23 @@ def main():
                             log("跳过已导入过的图片：%s（时间线片段删除后会自动归档）"
                                 % os.path.basename(f))
                             continue
-                        moved = archive_files([f])
+                        moved, failed = archive_files([f])
                         if moved:
                             log("已归档新图片：" + os.path.basename(f))
                             pending.append(moved[0][1])
-                        else:
-                            # 归档失败（文件被占用等），先从原位置导入，之后自动补归档
+                            continue
+                        reason = failed[0][1] if failed else "未知原因"
+                        if not os.path.exists(f):
+                            # 文件在扫描与归档之间被移走/删除。绝不能拿不存在的路径去导入，
+                            # 否则会白跑 5 次导入重试（历史日志里的 WinError 2 就是这种情形）
                             seen.add(f)
-                            deferred.add(f)
-                            pending.append(f)
-                            log("归档失败，先从原位置导入：" + os.path.basename(f))
+                            log("放弃 %s：文件已不存在（%s）" % (os.path.basename(f), reason))
+                            continue
+                        # 文件还在（多半被别的程序占用）：先从原位置导入，之后再补归档
+                        seen.add(f)
+                        deferred.add(f)
+                        pending.append(f)
+                        log("归档失败（%s），先从原位置导入：%s" % (reason, os.path.basename(f)))
 
             # ---------- 2. 导入排队的图片 ----------
             if pending and project is not None:
@@ -367,10 +445,29 @@ def main():
                 referenced = pool_referenced_paths(project)
                 ready = [f for f in deferred if os.path.normpath(f) not in referenced]
                 if ready:
-                    moved = archive_files(ready)
-                    for f in ready:
+                    moved, failed = archive_files(ready)
+                    for f, _dest in moved:
                         deferred.discard(f)
                         seen.discard(f)  # 归档后允许以后重新丢同名图
+                        archive_retry.pop(f, None)
+                    for f, reason in failed:
+                        if not os.path.exists(f):
+                            deferred.discard(f)
+                            seen.discard(f)
+                            archive_retry.pop(f, None)
+                            log("放弃归档 %s：文件已不存在" % os.path.basename(f))
+                            continue
+                        # 文件还在（多半被占用）：留在 deferred 里下轮再试，不刷屏
+                        n = archive_retry.get(f, 0) + 1
+                        archive_retry[f] = n
+                        if n == 1:
+                            log("暂缓归档 %s：%s（会自动重试）" % (os.path.basename(f), reason))
+                        elif n >= 20:
+                            deferred.discard(f)
+                            seen.discard(f)
+                            archive_retry.pop(f, None)
+                            log("多次归档失败，暂时跳过 %s（文件仍在监视文件夹，可稍后手动处理）"
+                                % os.path.basename(f))
                     if moved:
                         log("时间线片段已删除，自动归档清理 %d 张旧图片" % len(moved))
 
@@ -382,11 +479,13 @@ def main():
                     log("时间线上图片超过 %d 张，已删除最旧的 %d 张、清理媒体池 %d 项"
                         "（图片文件仍保留在归档文件夹）" % (MAX_TIMELINE_ITEMS, n_del, n_pool))
 
-            time.sleep(POLL_INTERVAL)
+            sleep_for = POLL_INTERVAL
         except Exception:
             log("发生错误：\n" + traceback.format_exc())
-            time.sleep(3)
-
+            sleep_for = 3
+        # 每轮都写心跳，供中文控制台「健康状态」区读取（写失败不影响主流程）
+        write_status(connected, project_name, len(pending), len(deferred), len(seen), started_ts)
+        time.sleep(sleep_for)
 
 if __name__ == "__main__":
     main()

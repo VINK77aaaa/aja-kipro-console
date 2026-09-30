@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AJA Ki Pro 中文控制台</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --card: #161b23;
+    --card2: #1b222c;
+    --line: #26303d;
+    --text: #e8edf4;
+    --dim: #8b98a9;
+    --green: #2fbf71;
+    --red: #e5484d;
+    --amber: #e6a23c;
+    --blue: #4c9aff;
+    --mono: Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; }
+
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  header h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: 1px; }
+  header h1 small { color: var(--dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--card2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 12px; font-size: 12.5px; color: var(--dim);
+  }
+  .pill b { color: var(--text); font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+  .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.off { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .spacer { flex: 1; }
+  a.english-link {
+    color: var(--blue); text-decoration: none; font-size: 12.5px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; background: var(--card2);
+  }
+  a.english-link:hover { border-color: var(--blue); }
+  label.auto { color: var(--dim); font-size: 12.5px; display: inline-flex; gap: 5px; align-items: center; user-select: none; }
+
+  #devbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  #devbar .lbl { color: var(--dim); font-size: 12.5px; }
+  .devchip {
+    background: var(--card2); border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 14px; font-size: 13px; color: var(--dim); cursor: pointer; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .devchip:hover { border-color: var(--blue); }
+  .devchip.on { color: var(--text); border-color: var(--blue); }
+  .devchip .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .devchip .sdot.on { background: var(--green); }
+  .devchip .sdot.off { background: var(--red); }
+
+  #banner {
+    display: none; background: #3a1518; border: 1px solid var(--red);
+    color: #ffb4b6; border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; font-size: 13.5px;
+  }
+  #banner.show { display: block; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  }
+  .card .k { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  .card .v { font-size: 17px; font-weight: 600; word-break: break-all; }
+  .card .v small { color: var(--dim); font-weight: 400; }
+  .card.tc { grid-column: span 2; }
+  .card.tc .v { font-family: var(--mono); font-size: 38px; letter-spacing: 2px; color: #fff; }
+  .card.wide { grid-column: span 2; }
+
+  .badge {
+    display: inline-block; border-radius: 8px; padding: 3px 12px; font-weight: 700; font-size: 15px;
+    background: #2a3140; color: var(--text);
+  }
+  .badge.rec { background: #4a1417; color: #ff7d81; }
+  .badge.play { background: #11321f; color: #5fe39a; }
+  .badge.warn { background: #3a2c10; color: #ffd07a; }
+
+  .bar { height: 7px; border-radius: 4px; background: #232b36; margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+
+  .transport { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tbtn {
+    background: var(--card2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 22px; font-size: 15px; cursor: pointer; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 8px; transition: border-color .15s, transform .05s;
+  }
+  .tbtn:hover { border-color: var(--blue); }
+  .tbtn:active { transform: scale(.97); }
+  .tbtn:disabled { opacity: .4; cursor: not-allowed; }
+  .tbtn.play:not(:disabled) { border-color: #1d5c38; }
+  .tbtn.rec:not(:disabled) { border-color: #7a2126; color: #ff9a9d; }
+  .tbtn.rec:not(:disabled):hover { border-color: var(--red); }
+  .tbtn .ic { font-size: 16px; }
+
+  section.block { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  section.block > h2 { margin: 0 0 12px; font-size: 15.5px; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  section.block > h2 .hint { font-size: 12px; color: var(--dim); font-weight: 400; }
+  fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 0 0 14px; padding: 10px 14px 14px; min-width: 0; }
+  fieldset legend { color: var(--dim); font-size: 12.5px; padding: 0 6px; }
+  .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px 16px; }
+  .cfg { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .cfg > label { color: var(--dim); font-size: 12.5px; }
+  .cfg select, .cfg input[type=text], .cfg input[type=number] {
+    background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 9px; font-size: 14px; font-family: inherit; width: 100%; outline: none;
+  }
+  .cfg select:focus, .cfg input:focus { border-color: var(--blue); }
+  .cfg select:disabled, .cfg input:disabled { opacity: .45; }
+  .cfg .en { color: var(--dim); font-size: 11.5px; min-height: 15px; }
+  .cfg .ro { font-size: 17px; font-weight: 600; padding: 5px 0; }
+
+  table.clips { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.clips th, table.clips td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  table.clips th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  table.clips tr:hover td { background: var(--card2); }
+  .empty { color: var(--dim); padding: 18px 4px; text-align: center; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { background: var(--card2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 14px; font-size: 12.5px; color: var(--dim); }
+  .chip.on { color: var(--text); border-color: var(--blue); }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .mini {
+    background: var(--card2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px; font-family: inherit;
+  }
+  .mini:hover { border-color: var(--blue); }
+  .mini.primary { border-color: var(--blue); }
+  .mini:disabled { opacity: .4; cursor: not-allowed; }
+
+  .hrow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .hrow:last-child { border-bottom: none; }
+  .hrow .hk { width: 150px; flex: none; color: var(--dim); font-size: 12.5px; }
+  .hrow .hv { flex: 1; min-width: 0; word-break: break-all; }
+  .hrow .hv.bad { color: #ff9a9d; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+    background: #202836; border: 1px solid var(--line); color: var(--text);
+    padding: 10px 20px; border-radius: 10px; font-size: 13.5px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; max-width: 80vw; z-index: 9;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.ok { border-color: var(--green); }
+  #toast.err { border-color: var(--red); }
+
+  .updated { color: var(--dim); font-size: 11.5px; }
+  .dirty { color: var(--amber); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AJA Ki Pro <small>中文控制台</small></h1>
+    <span class="pill"><span class="dot" id="conn-dot"></span><b id="conn-text">连接中…</b></span>
+    <span class="pill">设备 <b id="dev-current">—</b></span>
+    <span class="pill">型号 <b id="dev-product">—</b></span>
+    <span class="pill">固件 <b id="dev-sw">—</b></span>
+    <span class="pill">系统名 <b id="dev-sys">—</b></span>
+    <span class="spacer"></span>
+    <label class="auto"><input type="checkbox" id="auto-refresh" checked> 自动刷新（3 秒）</label>
+    <a class="english-link" id="english-link" href="#" target="_blank">打开英文原版页面 ↗</a>
+  </header>
+
+  <div id="devbar"></div>
+
+  <div id="banner"></div>
+
+  <div class="grid" id="status-grid">
+    <div class="card tc"><div class="k">时码 TIMECODE</div><div class="v" id="st-timecode">--:--:--:--</div></div>
+    <div class="card"><div class="k">走带状态</div><div class="v"><span class="badge" id="st-transport">—</span></div></div>
+    <div class="card"><div class="k">视频输入</div><div class="v" id="st-input">—</div></div>
+    <div class="card"><div class="k">录制格式</div><div class="v" id="st-recfmt">—</div></div>
+    <div class="card"><div class="k">当前片段</div><div class="v" id="st-clip">—</div></div>
+    <div class="card"><div class="k">介质槽</div><div class="v" id="st-slot">—</div></div>
+    <div class="card"><div class="k">介质格式 / 卷名</div><div class="v" id="st-mediafmt">—</div></div>
+    <div class="card wide">
+      <div class="k">剩余空间</div>
+      <div class="v" id="st-avail">—</div>
+      <div class="bar"><i id="st-avail-bar" style="width:0%"></i></div>
+    </div>
+  </div>
+
+  <div class="transport">
+    <button class="tbtn" id="btn-prev"><span class="ic">⏮</span>上一片段</button>
+    <button class="tbtn play" id="btn-play"><span class="ic">▶</span>播放</button>
+    <button class="tbtn" id="btn-stop"><span class="ic">⏹</span>停止</button>
+    <button class="tbtn rec" id="btn-record"><span class="ic">⏺</span>录制</button>
+    <button class="tbtn" id="btn-next">下一片段<span class="ic">⏭</span></button>
+    <span class="updated" id="updated-at"></span>
+  </div>
+
+  <section class="block">
+    <h2>拍摄前命名 <span class="hint">改完后点「下发命名设置」一次性写入（弹确认框，写后自动回读校验）</span></h2>
+    <div class="cfg-grid" id="naming-grid">
+      <div class="cfg">
+        <label for="nm-use">启用自定义命名</label>
+        <select id="nm-use"></select>
+        <div class="en" id="nm-use-en"></div>
+      </div>
+      <div class="cfg">
+        <label for="nm-name">自定义片段名</label>
+        <input type="text" id="nm-name" maxlength="64" placeholder="例如 MYQC20261002" autocomplete="off" spellcheck="false">
+        <div class="en" id="nm-name-en"></div>
+      </div>
+      <div class="cfg">
+        <label for="nm-take">Take（条号）</label>
+        <input type="number" id="nm-take" min="0" max="9999" step="1" autocomplete="off">
+        <div class="en" id="nm-take-en"></div>
+      </div>
+      <div class="cfg">
+        <label for="nm-append">片段名后缀方式</label>
+        <select id="nm-append"></select>
+        <div class="en" id="nm-append-en"></div>
+      </div>
+      <div class="cfg">
+        <label for="nm-alpha">后缀字母</label>
+        <select id="nm-alpha"></select>
+        <div class="en" id="nm-alpha-en"></div>
+      </div>
+      <div class="cfg">
+        <label>当前片段号（设备只读）</label>
+        <div class="ro" id="nm-clipno">—</div>
+        <div class="en" id="nm-clipno-en"></div>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:12px">
+      <button class="mini primary" id="nm-apply">下发命名设置</button>
+      <button class="mini" id="nm-reset">撤销改动</button>
+      <span class="dirty" id="nm-dirty"></span>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>设备配置 <span class="hint">下拉修改即下发设备（弹确认框）· 括号内为设备原始英文值</span></h2>
+    <div id="config-groups"></div>
+  </section>
+
+  <section class="block">
+    <h2>介质素材 <span class="hint">读取自设备剪辑列表</span></h2>
+    <div class="chips" id="playlists"></div>
+    <div class="actions" style="margin-bottom:10px">
+      <button class="mini" id="btn-clips">↻ 刷新素材列表</button>
+    </div>
+    <div id="clips-box"><div class="empty">正在读取…</div></div>
+  </section>
+
+  <section class="block">
+    <h2>健康状态 <span class="hint">面板服务 / 各设备在线 / 图片实时导入心跳</span></h2>
+    <div id="health-box"><div class="empty">正在读取…</div></div>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+// ============ 中文词典：设备英文值 → 中文 ============
+const CN_EXACT = {
+  // 走带
+  'Idle':'空闲', 'Recording':'录制中', 'Record':'录制中', 'Playing':'播放中', 'Play':'播放',
+  'Paused':'已暂停', 'Pause':'暂停', 'Stop':'停止', 'Rew':'倒带', 'FF':'快进',
+  'Uninitialized':'未初始化', 'Shutdown':'已关机',
+  // 介质状态
+  'Record-Play':'录制-播放', 'Data - LAN':'数据 - LAN', 'Data-LAN':'数据 - LAN', 'Data FireWire':'数据 - 火线',
+  'No Media':'未插入介质', 'Unformatted':'未格式化', 'Damaged':'已损坏', 'Low Capacity':'空间不足',
+  'Not Present':'不存在', 'Unmount Failed':'卸载失败', 'In Use':'使用中',
+  // 编码 / 文件
+  'Multi Channel':'多通道', 'Single Channel':'单通道', 'MOV':'MOV', 'MFX':'MFX',
+  'No Input':'无输入', 'No Input ProRes':'无输入（ProRes 待命）',
+  'SDI YCbCr':'SDI YCbCr', 'SDI RGB':'SDI RGB',
+  // 播放
+  'One':'单个片段', 'All':'全部片段', 'Playlist':'播放列表',
+  'None':'无', 'Alpha':'字母后缀',
+  'ON':'开', 'OFF':'关', 'On':'开', 'Off':'关', 'Continue':'继续（不停录）',
+  // 输出通道
+  'All Channels':'所有通道',
+  // 音频输入
+  'SDI/Fiber (1-16)':'SDI/光纤 (1-16)', 'Analog (1-8)':'模拟 (1-8)', 'AES (1-8)':'AES (1-8)',
+  'HDMI (1-8)':'HDMI (1-8)', 'HDMI (1/2)':'HDMI (1/2)',
+  // 音频通道
+  '2 Channels':'2 通道', '8 Channels':'8 通道',
+  // 文件系统
+  'HFS+':'HFS+', 'ExFAT':'ExFAT',
+  // 命名
+  'Leader Name':'主机命名', 'Follower Name':'跟随命名',
+  // 网口
+  'DHCP':'自动获取 (DHCP)', 'Static':'手动指定', 'Default':'默认',
+  // 介质操作进度
+  'Operation Complete':'操作完成', 'Operation Completed':'操作完成', 'In Progress':'进行中',
+  'No Operation':'无操作',
+  // 其他常见
+  'Connected':'已连接', 'Ethernet':'以太网', 'WiFi':'Wi-Fi', 'N/A':'无',
+};
+// 固件版本号：设备返回 34078744 这类整数，实际是 0x02080018 → 2.8.0.24
+function decodeSwVersion(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0 || n > 0xffffffff) return v;
+  const b = [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+  return b.join('.');
+}
+const CN_RE = [
+  [/^(\d+) channels?$/i, (m) => `${m[1]} 通道`],
+  [/^Channel (\d+)$/i, (m) => `通道 ${m[1]}`],
+  [/^Analog \((\d+)\/(\d+)\)$/i, (m) => `模拟 (${m[1]}/${m[2]})`],
+  [/^Analog \((\d+)-(\d+)\)$/i, (m) => `模拟 (${m[1]}-${m[2]})`],
+  [/^AES \((\d+)\/(\d+)\)$/i, (m) => `AES (${m[1]}/${m[2]})`],
+  [/^AES \((\d+)-(\d+)\)$/i, (m) => `AES (${m[1]}-${m[2]})`],
+  [/^SDI[ /]?(\d+)?[ ]?\((\d+)-(\d+)\)$/i, (m) => `SDI (${m[2]}-${m[3]})`],
+  [/^Slot (\d+)$/i, (m) => `介质槽 ${m[1]}`],
+  [/^(\d+)x(\d+)([ip]) ?([\d.]+)?$/i, (m) => `${m[1]}×${m[2]}${m[3]} ${m[4] || ''}`.trim()],
+];
+function cn(s) {
+  if (s === null || s === undefined || s === '') return '';
+  if (CN_EXACT[s] !== undefined) return CN_EXACT[s];
+  for (const [re, fn] of CN_RE) { const m = s.match(re); if (m) return fn(m); }
+  return s; // 未收录的保留原文
+}
+
+// 走带状态：数值 → 中文（枚举值来自设备固件定义）
+const TRANSPORT_CN = {
+  0:'未初始化', 1:'空闲', 2:'录制中', 3:'播放中', 4:'2× 播放', 5:'4× 播放', 6:'8× 播放', 7:'16× 播放',
+  8:'单步前进', 9:'倒放', 10:'2× 倒放', 11:'4× 倒放', 12:'8× 倒放', 13:'16× 倒放', 14:'单步倒放',
+  15:'播放暂停', 16:'空闲（故障）', 17:'录制（故障）', 18:'播放（故障）', 19:'暂停（故障）', 20:'已关机',
+};
+
+// ============ 面板配置 ============
+const CONFIG_GROUPS = [
+  { title: '录制与编码', items: [
+    { p: 'eParamID_MediaState',         label: '介质状态' },
+    { p: 'eParamID_EncodeChannels',     label: '编码通道' },
+    { p: 'eParamID_ChannelsToRecord',   label: '录制通道数' },
+    { p: 'eParamID_FileFormat',         label: '文件封装' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch1', label: '通道 1 编码' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch2', label: '通道 2 编码' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch3', label: '通道 3 编码' },
+    { p: 'eParamID_EncodeType_MultiChnl_Ch4', label: '通道 4 编码' },
+  ]},
+  { title: '音频', items: [
+    { p: 'eParamID_AudioChannels',           label: '音频通道数' },
+    { p: 'eParamID_AudioInSelectCh1',        label: '通道 1 音频输入' },
+    { p: 'eParamID_AudioInSelectCh2',        label: '通道 2 音频输入' },
+    { p: 'eParamID_AudioInSelectCh3',        label: '通道 3 音频输入' },
+    { p: 'eParamID_AudioInSelectCh4',        label: '通道 4 音频输入' },
+    { p: 'eParamID_AudioEncodeChannelFocus', label: '耳机监听通道' },
+  ]},
+  { title: '播放与输出', items: [
+    { p: 'eParamID_PlayMedia',          label: '播放介质' },
+    { p: 'eParamID_SDIMonitorChannel',  label: 'SDI 监视通道' },
+    { p: 'eParamID_HDMIOutChannel',     label: 'HDMI 输出通道' },
+  ]},
+];
+
+// 拍摄前命名：全部为「暂存 → 一次性下发」，避免边打字边写设备
+const NAMING_FIELDS = [
+  { key: 'use',    p: 'eParamID_UseCustomClipName', label: '启用自定义命名', type: 'select' },
+  { key: 'name',   p: 'eParamID_CustomClipName',    label: '自定义片段名',   type: 'text'   },
+  { key: 'take',   p: 'eParamID_CustomTake',        label: 'Take（条号）',   type: 'number' },
+  { key: 'append', p: 'eParamID_ClipAppend',        label: '片段名后缀方式', type: 'select' },
+  { key: 'alpha',  p: 'eParamID_AlphaAppend',       label: '后缀字母',       type: 'select' },
+];
+const NAMING_READONLY = [
+  { key: 'clipno', p: 'eParamID_ClipNumber', label: '当前片段号' },
+];
+
+const $ = (id) => document.getElementById(id);
+const state = {
+  devices: [],       // [{id,name,ip,online,product}]
+  currentDev: null,  // 当前设备 id
+  params: {},        // 请求名 -> { param:设备实际名, value, value_name }
+  options: {},       // 请求名 -> [{value,text}]（options 用的也是设备实际名）
+  optionsName: {},   // 请求名 -> 取选项时用的设备名（变了才重取）
+  online: false,
+  refreshing: false,
+  namingDirty: false,
+};
+
+function toast(msg, ok) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (ok ? 'ok' : 'err');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.className = ''), ok ? 3200 : 6000);
+}
+
+function setOnline(on, errMsg) {
+  state.online = on;
+  $('conn-dot').className = 'dot ' + (on ? 'on' : 'off');
+  $('conn-text').textContent = on ? '已连接' : '离线';
+  const b = $('banner');
+  if (!on) {
+    b.textContent = '⚠ ' + (errMsg || '无法连接设备') + ' —— 正在自动重试；英文页面不受影响。';
+    b.classList.add('show');
+  } else {
+    b.classList.remove('show');
+  }
+  document.querySelectorAll('.tbtn').forEach((el) => (el.disabled = !on));
+  updateNamingEnabled();
+}
+
+// 所有请求自动带上当前设备
+async function api(pathname, query) {
+  const qs = new URLSearchParams();
+  if (state.currentDev !== null && state.currentDev !== undefined) qs.set('dev', state.currentDev);
+  if (query) Object.entries(query).forEach(([k, v]) => qs.set(k, v));
+  const q = qs.toString();
+  const r = await fetch(pathname + (q ? '?' + q : ''));
+  let data = {};
+  try { data = await r.json(); } catch { data = {}; }
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+// —— 设备栏 ——
+function renderDeviceBar() {
+  const bar = $('devbar');
+  bar.innerHTML = '';
+  if (!state.devices.length) return;
+  const lbl = document.createElement('span');
+  lbl.className = 'lbl';
+  lbl.textContent = state.devices.length > 1 ? '选择设备：' : '当前设备：';
+  bar.appendChild(lbl);
+  for (const d of state.devices) {
+    const b = document.createElement('button');
+    b.className = 'devchip' + (String(d.id) === String(state.currentDev) ? ' on' : '');
+    b.type = 'button';
+    const dot = document.createElement('span');
+    dot.className = 'sdot ' + (d.online ? 'on' : 'off');
+    b.appendChild(dot);
+    b.appendChild(document.createTextNode(`${d.name} · ${d.ip}`));
+    b.addEventListener('click', () => switchDevice(d.id));
+    bar.appendChild(b);
+  }
+  const cur = state.devices.find((d) => String(d.id) === String(state.currentDev));
+  if (cur) {
+    $('dev-current').textContent = `${cur.name}（${cur.ip}）`;
+    const link = $('english-link');
+    link.href = 'http://' + cur.ip + '/';
+    link.textContent = `打开 ${cur.name} 英文原版页面 ↗`;
+  }
+}
+
+async function loadDevices() {
+  try {
+    const data = await api('/api/devices');
+    state.devices = data.devices || [];
+    if (state.currentDev === null && state.devices.length) state.currentDev = state.devices[0].id;
+    renderDeviceBar();
+  } catch (e) {
+    // 设备清单拿不到时保持静默，refreshAll 会给出离线横幅
+  }
+}
+
+async function switchDevice(id) {
+  if (String(id) === String(state.currentDev)) return;
+  state.currentDev = id;
+  state.params = {};
+  state.options = {};
+  state.optionsName = {};
+  state.namingDirty = false;
+  renderDeviceBar();
+  buildConfigDOM();
+  renderNaming();
+  await refreshAll();
+  await loadClips();
+}
+
+// —— 状态区 ——
+function renderStatus() {
+  const g = (p) => state.params[p];
+  const shown = (p) => cn(g(p)?.value_name) || g(p)?.value || '—';
+  $('dev-product').textContent = shown('eParamID_ProductID');
+  const swRaw = g('eParamID_SWVersion')?.value_name || g('eParamID_SWVersion')?.value || '';
+  $('dev-sw').textContent = swRaw === '' ? '—' : (/^\d+$/.test(swRaw) ? decodeSwVersion(swRaw) : swRaw);
+  $('dev-sys').textContent = shown('eParamID_SysName');
+
+  const ts = g('eParamID_TransportState');
+  const tv = ts ? Number(ts.value) : null;
+  const badge = $('st-transport');
+  badge.textContent = tv !== null && TRANSPORT_CN[tv] !== undefined
+    ? TRANSPORT_CN[tv]
+    : cn(ts?.value_name) || '—';
+  badge.className = 'badge ' + (tv === 2 ? 'rec' : (tv >= 3 && tv <= 15) ? 'play' : (tv >= 16 && tv <= 19) ? 'warn' : '');
+
+  const inp = g('eParamID_DetectInputFormat');
+  const inpEl = $('st-input');
+  inpEl.textContent = cn(inp?.value_name) || '—';
+  inpEl.innerHTML = inp && inp.value_name === 'No Input'
+    ? '<span class="badge warn">无输入</span>'
+    : inpEl.textContent;
+
+  $('st-recfmt').textContent = cn(g('eParamID_RecordFormat')?.value_name) || '—';
+  $('st-clip').textContent = cn(g('eParamID_CurrentClip')?.value_name) || cn(g('eParamID_CurrentClip')?.value) || '—';
+  $('st-timecode').textContent = g('eParamID_DisplayTimecode')?.value || '--:--:--:--';
+
+  const slot = g('eParamID_SelectedSlot');
+  const slotEl = $('st-slot');
+  slotEl.textContent = cn(slot?.value_name) || '—';
+  slotEl.innerHTML = slot && slot.value_name === 'No Media'
+    ? '<span class="badge rec" style="background:#3a2c10;color:#ffd07a">未插入介质</span>'
+    : slotEl.textContent;
+
+  const mf = cn(g('eParamID_DetectMediaFormat')?.value_name) || '';
+  const vn = g('eParamID_VolumeName')?.value_name || '';
+  $('st-mediafmt').textContent = (mf || '—') + (vn ? '　/　卷名 ' + vn : '');
+
+  const avail = g('eParamID_CurrentMediaAvailable');
+  if (avail) {
+    const pct = Number(avail.value);
+    $('st-avail').innerHTML = isNaN(pct) ? '—' : `${pct}<small> %</small>`;
+    $('st-avail-bar').style.width = (isNaN(pct) ? 0 : Math.max(0, Math.min(100, pct))) + '%';
+  }
+  $('updated-at').textContent = '数据更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+// —— 配置区 ——
+function buildConfigDOM() {
+  const box = $('config-groups');
+  box.innerHTML = '';
+  for (const group of CONFIG_GROUPS) {
+    const fs = document.createElement('fieldset');
+    const legend = document.createElement('legend');
+    legend.textContent = group.title;
+    fs.appendChild(legend);
+    const grid = document.createElement('div');
+    grid.className = 'cfg-grid';
+    for (const item of group.items) {
+      const div = document.createElement('div');
+      div.className = 'cfg';
+      const lab = document.createElement('label');
+      lab.textContent = item.label;
+      const sel = document.createElement('select');
+      sel.id = 'cfg-' + item.p;
+      sel.disabled = true;
+      sel.innerHTML = '<option>…</option>';
+      sel.addEventListener('change', () => onConfigChange(item, sel));
+      const en = document.createElement('div');
+      en.className = 'en';
+      en.id = 'cfg-en-' + item.p;
+      div.append(lab, sel, en);
+      grid.appendChild(div);
+    }
+    fs.appendChild(grid);
+    box.appendChild(fs);
+  }
+}
+
+async function loadOptions(item) {
+  const actual = state.params[item.p]?.param;
+  if (!actual) return;
+  if (state.optionsName[item.p] === actual && state.options[item.p]) return; // 已有
+  try {
+    const data = await api('/api/options', { param: actual });
+    state.options[item.p] = data.options;
+    state.optionsName[item.p] = actual;
+  } catch {
+    state.options[item.p] = null;
+  }
+  renderConfigSelect(item);
+}
+
+function renderConfigSelect(item) {
+  const sel = $('cfg-' + item.p);
+  if (!sel) return;
+  const en = $('cfg-en-' + item.p);
+  const cur = state.params[item.p];
+  const opts = state.options[item.p];
+  if (!cur) { sel.disabled = true; return; }
+
+  const list = opts || [{ value: cur.value, text: cur.value_name || cur.value }];
+  const focused = document.activeElement === sel;
+  sel.innerHTML = '';
+  for (const o of list) {
+    const op = document.createElement('option');
+    op.value = o.value;
+    op.textContent = cn(o.text) + (cn(o.text) !== o.text ? `（${o.text}）` : '');
+    if (String(o.value) === String(cur.value)) op.selected = true;
+    sel.appendChild(op);
+  }
+  if (!opts) {
+    // 选项表拿不到时只读显示当前值
+    sel.disabled = true;
+    if (en) en.textContent = '';
+  } else {
+    sel.disabled = !state.online;
+    if (en) en.textContent = list.find((o) => String(o.value) === String(cur.value))
+      ? '当前：' + (cur.value_name || cur.value)
+      : '当前值不在选项列表中（' + (cur.value_name || cur.value) + '）';
+  }
+  if (focused) sel.focus();
+}
+
+async function onConfigChange(item, sel) {
+  const cur = state.params[item.p];
+  if (!cur) return;
+  const oldValue = cur.value;
+  const newValue = sel.value;
+  if (String(newValue) === String(oldValue)) return;
+  const optText = (state.options[item.p] || []).find((o) => String(o.value) === String(newValue));
+  const oldText = (state.options[item.p] || []).find((o) => String(o.value) === String(oldValue));
+  const devName = state.devices.find((d) => String(d.id) === String(state.currentDev))?.name || '';
+  const ok = confirm(
+    `确认修改「${item.label}」？\n\n` +
+      `${cn(oldText?.text) || oldValue}（${oldText?.text || oldValue}）` +
+      `  →  ${cn(optText?.text) || newValue}（${optText?.text || newValue}）\n\n` +
+      `将立即下发到设备 ${devName}。`,
+  );
+  if (!ok) { sel.value = oldValue; return; }
+  sel.disabled = true;
+  try {
+    const res = await api('/api/set', { param: cur.param, value: newValue });
+    if (res.verified && res.applied === false) {
+      toast(`未生效：${item.label} 仍为 ${res.actual_value_name || res.actual_value}（设备可能拒绝了该值）`, false);
+    } else {
+      toast(`已下发并回读确认：${item.label} → ${cn(optText?.text) || newValue}`, true);
+    }
+  } catch (e) {
+    toast('下发失败：' + e.message, false);
+  }
+  await refreshAll();
+}
+
+// —— 拍摄前命名 ——
+function buildNamingDOM() {
+  for (const f of NAMING_FIELDS) {
+    const el = $('nm-' + f.key);
+    if (f.type === 'select') el.addEventListener('change', markNamingDirty);
+    else el.addEventListener('input', markNamingDirty);
+  }
+  $('nm-apply').addEventListener('click', applyNaming);
+  $('nm-reset').addEventListener('click', () => {
+    state.namingDirty = false;
+    renderNaming();
+    toast('已撤销未下发的改动', true);
+  });
+}
+
+function markNamingDirty() {
+  state.namingDirty = true;
+  $('nm-dirty').textContent = '有未下发的改动';
+}
+
+function fillSelect(el, cur, opts, fallbackText) {
+  const list = opts && opts.length ? opts : [{ value: cur ? cur.value : '', text: fallbackText }];
+  const focused = document.activeElement === el;
+  const keep = el.value;
+  el.innerHTML = '';
+  for (const o of list) {
+    const op = document.createElement('option');
+    op.value = o.value;
+    op.textContent = cn(o.text) + (cn(o.text) !== o.text ? `（${o.text}）` : '');
+    el.appendChild(op);
+  }
+  const want = state.namingDirty && keep !== '' ? keep : (cur ? String(cur.value) : '');
+  if (list.some((o) => String(o.value) === want)) el.value = want;
+  if (focused) el.focus();
+}
+
+function renderNaming() {
+  const g = (p) => state.params[p];
+  for (const f of NAMING_FIELDS) {
+    const el = $('nm-' + f.key);
+    const en = $('nm-' + f.key + '-en');
+    const cur = g(f.p);
+    if (f.type === 'select') {
+      fillSelect(el, cur, state.options[f.p], cur ? cur.value_name || cur.value : '—');
+      el.disabled = !state.online;
+      if (en) en.textContent = cur ? '当前：' + (cur.value_name || cur.value) : '';
+    } else {
+      if (!state.namingDirty) el.value = cur ? String(cur.value) : '';
+      el.disabled = !state.online;
+      if (en) en.textContent = cur ? '当前：' + (cur.value_name || cur.value) : '';
+    }
+  }
+  for (const r of NAMING_READONLY) {
+    const cur = g(r.p);
+    $('nm-' + r.key).textContent = cur ? (cur.value_name || cur.value) : '—';
+    const en = $('nm-' + r.key + '-en');
+    if (en) en.textContent = cur ? '设备返回 ' + r.p : '';
+  }
+  if (!state.namingDirty) $('nm-dirty').textContent = '';
+}
+
+function updateNamingEnabled() {
+  for (const f of NAMING_FIELDS) {
+    const el = $('nm-' + f.key);
+    if (el) el.disabled = !state.online;
+  }
+  const btn = $('nm-apply');
+  if (btn) btn.disabled = !state.online;
+}
+
+async function applyNaming() {
+  const g = (p) => state.params[p];
+  const plan = [];
+  for (const f of NAMING_FIELDS) {
+    const cur = g(f.p);
+    if (!cur) continue;
+    const el = $('nm-' + f.key);
+    const val = String(el.value).trim();
+    if (f.type !== 'text' && val === '') {
+      toast(`「${f.label}」不能为空`, false);
+      return;
+    }
+    if (f.type === 'number' && !/^\d+$/.test(val)) {
+      toast(`「${f.label}」必须是整数`, false);
+      return;
+    }
+    if (String(cur.value) !== String(val)) plan.push({ p: f.p, label: f.label, value: val, cur });
+  }
+  if (!plan.length) {
+    toast('没有需要下发的改动', true);
+    state.namingDirty = false;
+    renderNaming();
+    return;
+  }
+  const devName = state.devices.find((d) => String(d.id) === String(state.currentDev))?.name || '';
+  const ok = confirm(
+    `确认下发以下命名设置到 ${devName}？\n\n` +
+      plan.map((x) => `· ${x.label}：${x.cur.value_name || x.cur.value}  →  ${x.value}`).join('\n') +
+      '\n\n将在下一次录制时生效。',
+  );
+  if (!ok) return;
+
+  const errs = [];
+  for (const it of plan) {
+    try {
+      const res = await api('/api/set', { param: it.p, value: it.value });
+      if (res.verified && res.applied === false) {
+        errs.push(`${it.label} 未生效（设备现值 ${res.actual_value_name || res.actual_value}）`);
+      }
+    } catch (e) {
+      errs.push(`${it.label} 失败：${e.message}`);
+    }
+  }
+  if (errs.length) {
+    toast('部分未生效：' + errs.join('；'), false);
+  } else {
+    toast(`命名设置已下发并回读确认（${plan.length} 项）`, true);
+    state.namingDirty = false;
+  }
+  await refreshAll();
+}
+
+// —— 走带控制 ——
+const TRANSPORT_BTN = [
+  { id: 'btn-prev',   value: 10, confirm: false, name: '上一片段' },
+  { id: 'btn-play',   value: 1,  confirm: false, name: '播放' },
+  { id: 'btn-stop',   value: 4,  confirm: false, name: '停止' },
+  { id: 'btn-record', value: 3,  confirm: true,  name: '录制' },
+  { id: 'btn-next',   value: 9,  confirm: false, name: '下一片段' },
+];
+for (const b of TRANSPORT_BTN) {
+  $(b.id).addEventListener('click', async () => {
+    if (!state.online) return;
+    if (b.confirm && !confirm(`确认向设备下发【${b.name}】命令？\n\n（当前无输入信号时设备会拒绝录制）`)) return;
+    try {
+      // 走带是瞬时命令，不做回读校验
+      await api('/api/set', { param: 'eParamID_TransportCommand', value: String(b.value), verify: '0' });
+      toast('已发送：' + b.name, true);
+    } catch (e) {
+      toast('发送失败：' + e.message, false);
+    }
+    refreshAll();
+  });
+}
+
+// —— 素材 ——
+async function loadClips() {
+  const box = $('clips-box');
+  try {
+    const data = await api('/api/clips');
+    const chips = $('playlists');
+    chips.innerHTML = '';
+    const all = document.createElement('span');
+    all.className = 'chip on';
+    all.textContent = '全部片段';
+    chips.appendChild(all);
+    for (const pl of data.playlists) {
+      const name = pl.playlist?.name || pl.filename || '';
+      if (!name || name === 'All Clips') continue; // "全部片段" 徽标已单独渲染
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = name;
+      chips.appendChild(c);
+    }
+    if (!data.clips.length) {
+      box.innerHTML = '<div class="empty">设备上暂无素材 —— 介质槽未插卡或还未录制。<br>插卡录制后点「刷新素材列表」。</div>';
+      return;
+    }
+    const cols = Object.keys(data.clips[0]);
+    const colCN = { clipname: '片段名', clipnumber: '片段号', duration: '时长', name: '名称', reel: 'Reel', slot: '介质槽' };
+    let html = '<table class="clips"><thead><tr>' +
+      cols.map((c) => `<th>${colCN[c] || c}</th>`).join('') +
+      '</tr></thead><tbody>';
+    for (const clip of data.clips) {
+      html += '<tr>' + cols.map((c) => `<td>${String(clip[c] ?? '').replace(/</g, '&lt;')}</td>`).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">读取素材失败：${e.message}</div>`;
+  }
+}
+
+// —— 健康状态 ——
+function fmtDur(sec) {
+  sec = Number(sec) || 0;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return `${h} 小时 ${m} 分`;
+  if (m) return `${m} 分 ${s} 秒`;
+  return `${s} 秒`;
+}
+
+function hrow(key, value, bad) {
+  const row = document.createElement('div');
+  row.className = 'hrow';
+  const k = document.createElement('div');
+  k.className = 'hk';
+  k.textContent = key;
+  const v = document.createElement('div');
+  v.className = 'hv' + (bad ? ' bad' : '');
+  v.textContent = value;
+  row.append(k, v);
+  return row;
+}
+
+async function loadHealth() {
+  const box = $('health-box');
+  try {
+    const h = await api('/api/health');
+    box.innerHTML = '';
+    box.appendChild(hrow('面板服务', `运行中 · 端口 ${h.panel.port} · 已运行 ${fmtDur(h.panel.uptime_s)} · Node ${h.panel.node}`, false));
+    for (const d of h.devices) {
+      const isCur = String(d.id) === String(state.currentDev);
+      box.appendChild(hrow(
+        `设备 ${d.name}${isCur ? '（当前）' : ''}`,
+        d.online ? `在线 · ${d.ip}${d.product ? ' · ' + d.product : ''}` : `离线 · ${d.ip}`,
+        !d.online,
+      ));
+    }
+    const w = h.watcher;
+    if (!w) {
+      box.appendChild(hrow('图片实时导入', '未检测到心跳 —— watch_images.py 未运行（或尚未启动过）', true));
+    } else {
+      const bits = [];
+      bits.push(w.alive ? `运行中（${w.beat_age_s}s 前心跳）` : `心跳已停止（${w.beat_age_s}s 未更新）`);
+      if (w.connected) bits.push(`达芬奇已连接${w.project ? ' · 项目 ' + w.project : ''}`);
+      else bits.push('达芬奇未连接');
+      if (typeof w.pending === 'number') bits.push(`待导入 ${w.pending} 张`);
+      if (typeof w.deferred === 'number' && w.deferred) bits.push(`待归档 ${w.deferred} 张`);
+      if (typeof w.max_timeline === 'number' && w.max_timeline) bits.push(`时间线上限 ${w.max_timeline} 张`);
+      box.appendChild(hrow('图片实时导入', bits.join(' · '), !w.alive));
+      box.appendChild(hrow('监视文件夹', w.watching || '—', false));
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="empty">读取健康状态失败：${e.message}</div>`;
+  }
+}
+
+// —— 主刷新 ——
+async function refreshAll() {
+  if (state.refreshing) return;
+  state.refreshing = true;
+  try {
+    const data = await api('/api/all');
+    state.params = data.params;
+    setOnline(true);
+    renderStatus();
+    const allItems = CONFIG_GROUPS.flatMap((g) => g.items).concat(NAMING_FIELDS);
+    await Promise.all(allItems.map(loadOptions));
+    allItems.forEach(renderConfigSelect);
+    renderNaming();
+  } catch (e) {
+    setOnline(false, e.message);
+  } finally {
+    state.refreshing = false;
+  }
+}
+
+// —— 启动 ——
+buildConfigDOM();
+buildNamingDOM();
+$('btn-clips').addEventListener('click', loadClips);
+$('auto-refresh').addEventListener('change', () => {});
+setInterval(() => { if ($('auto-refresh').checked && !document.hidden) refreshAll(); }, 3000);
+setInterval(() => { if ($('auto-refresh').checked && !document.hidden) loadClips(); }, 20000);
+setInterval(() => { if (!document.hidden) loadHealth(); }, 10000);
+setInterval(() => { if (!document.hidden) loadDevices(); }, 30000);
+
+(async function init() {
+  await loadDevices();
+  await refreshAll();
+  await loadClips();
+  await loadHealth();
+})();
+</script>
+</body>
+</html>
