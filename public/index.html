@@ -70,12 +70,23 @@
   .mini.rec:hover { border-color: var(--red); }
   .mini.stop { border-color: #2a3a4a; }
 
-  /* 卡片标题旁的小提示图标：与标题同高、弱化色，hover 才出 title */
+  /* 卡片标题旁的小提示图标：与标题同高、弱化色；hover 或点击都出说明气泡 */
   .k .iwarn {
-    font-size: 11px; line-height: 1; color: #6f7d90; margin-left: 4px;
+    background: none; border: 0; padding: 0; margin-left: 4px;
+    font-size: 11px; line-height: 1; color: #6f7d90; font-family: inherit;
     cursor: help; user-select: none; vertical-align: 1px;
   }
-  .k .iwarn:hover { color: var(--amber); }
+  .k .iwarn:hover, .k .iwarn:focus-visible { color: var(--amber); outline: none; }
+  .k .iwarn[aria-expanded="true"] { color: var(--amber); }
+
+  /* 说明气泡（hover 或点击图标出现；点击后固定，点别处 / Esc 关闭） */
+  .tip {
+    position: fixed; z-index: 30; max-width: 340px; pointer-events: none;
+    background: #202836; border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 12px; font-size: 12.5px; line-height: 1.65; color: var(--text);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+  }
+  .tip[hidden] { display: none; }
 
   /* 弹窗 */
   #modal {
@@ -244,7 +255,7 @@
     <div class="card"><div class="k" title="eParamID_RecordFormat —— 设备侦测值，只读。录制格式跟随 SDI 输入信号。">录制格式<small>（侦测·只读）</small></div><div class="v" id="st-recfmt">—</div></div>
     <div class="card"><div class="k">当前片段</div><div class="v" id="st-clip">—</div></div>
     <div class="card"><div class="k">介质槽</div><div class="v" id="st-slot">—</div></div>
-    <div class="card"><div class="k">介质格式<small>（跟随输入信号）</small> / 卷名<span class="iwarn" title="分辨率/帧率在摄像机端决定。Ki Pro 的录制格式跟随 SDI 输入信号——录像机侧只有侦测显示（RecordFormat/DetectMediaFormat，参数表均 readonly），没有可写的录制格式参数。要改请调摄像机输出或 SDI 信号源。">⚠</span></div><div class="v" id="st-mediafmt">—</div></div>
+    <div class="card"><div class="k">介质格式<small>（跟随输入信号）</small> / 卷名<button type="button" class="iwarn" aria-label="分辨率/帧率为什么不能改" aria-expanded="false">⚠</button></div><div class="v" id="st-mediafmt">—</div></div>
     <div class="card wide">
       <div class="k">剩余空间</div>
       <div class="v" id="st-avail">—</div>
@@ -538,6 +549,62 @@ $('modal-ok').addEventListener('click', async () => {
   }
 });
 $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
+
+// —— 卡片标题旁 ⚠ 的说明气泡：hover 出现，点击固定，点别处 / Esc 关闭 ——
+const IWARN_TEXT =
+  '分辨率/帧率在摄像机端决定。Ki Pro 的录制格式跟随 SDI 输入信号——' +
+  '录像机侧只有侦测显示（RecordFormat/DetectMediaFormat，参数表均 readonly），' +
+  '没有可写的录制格式参数。要改请调摄像机输出或 SDI 信号源。';
+
+function initInfoTips() {
+  const icons = Array.from(document.querySelectorAll('.iwarn'));
+  if (!icons.length) return;
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  let pinned = null;
+
+  const place = (icon) => {
+    tip.hidden = false;
+    tip.textContent = IWARN_TEXT;
+    const r = icon.getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    let top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+    tip.style.left = Math.round(left) + 'px';
+    tip.style.top = Math.round(top) + 'px';
+  };
+  const close = () => {
+    if (pinned) pinned.setAttribute('aria-expanded', 'false');
+    pinned = null;
+    tip.hidden = true;
+  };
+  const hoverOff = (icon) => {
+    if (pinned !== icon) tip.hidden = true;
+  };
+
+  for (const icon of icons) {
+    icon.addEventListener('mouseenter', () => { if (!pinned) place(icon); });
+    icon.addEventListener('mouseleave', () => hoverOff(icon));
+    icon.addEventListener('focus', () => { if (!pinned) place(icon); });
+    icon.addEventListener('blur', () => hoverOff(icon));
+    icon.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (pinned === icon) { close(); return; }
+      if (pinned) pinned.setAttribute('aria-expanded', 'false');
+      pinned = icon;
+      icon.setAttribute('aria-expanded', 'true');
+      place(icon);
+    });
+  }
+  document.addEventListener('click', () => close());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', () => { if (pinned) place(pinned); });
+  window.addEventListener('scroll', () => { if (pinned) place(pinned); }, true);
+}
 
 // —— 设备栏 ——
 function renderDeviceBar() {
@@ -1146,6 +1213,7 @@ async function refreshAll() {
 // —— 启动 ——
 buildConfigDOM();
 buildNamingDOM();
+initInfoTips();
 $('btn-clips').addEventListener('click', loadClips);
 $('btn-add-dev').addEventListener('click', openAddDevice);
 $('btn-gang-rec').addEventListener('click', () => gangCommand('record'));
