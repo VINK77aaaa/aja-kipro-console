@@ -233,6 +233,37 @@
   .alarm-name { font-size: 13.5px; font-weight: 600; }
   .alarm-desc { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
   .alarm-raw { color: #6f7d90; font-size: 11.5px; margin-top: 3px; font-family: var(--mono); word-break: break-all; }
+
+  .alarm-ctl { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .alarm-ctl select {
+    background: var(--card2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 5px 9px; font-size: 12.5px; font-family: inherit;
+  }
+  .alarm-ctl select:hover { border-color: var(--blue); }
+
+  /* 有「严重/错误」级告警时，卡片持续脉冲 */
+  #alarm-block.crit { border-color: var(--red); }
+  #alarm-block.crit > h2 { color: #ff9a9d; }
+  @media (prefers-reduced-motion: no-preference) {
+    #alarm-block.crit { animation: cardPulse 1.6s ease-in-out infinite; }
+    #alarm-block.crit .alarm-sev.fatal { animation: sevPulse 1.2s ease-in-out infinite; }
+  }
+  @keyframes cardPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+    50% { box-shadow: 0 0 0 3px rgba(229, 72, 77, .38); }
+  }
+  @keyframes sevPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .45; }
+  }
+
+  /* 新出现严重告警时的一次性全屏闪烁 */
+  #flash { position: fixed; inset: 0; pointer-events: none; z-index: 20; opacity: 0; }
+  #flash.on { animation: flashPulse .72s ease-in-out 5; }
+  @keyframes flashPulse {
+    0%, 100% { box-shadow: inset 0 0 0 0 rgba(229, 72, 77, 0); background: rgba(229, 72, 77, 0); }
+    50% { box-shadow: inset 0 0 0 9px rgba(229, 72, 77, .85); background: rgba(229, 72, 77, .07); }
+  }
 </style>
 </head>
 <body>
@@ -277,9 +308,22 @@
   </div>
 
   <section class="block" id="alarm-block">
-    <h2>告警 <span class="hint" id="alarm-hint">读自设备 Alarms 系统（只读，不向设备写任何参数）</span></h2>
+    <h2>告警
+      <span class="hint" id="alarm-hint">读自设备 Alarms 系统（只读，不向设备写任何参数）</span>
+      <span class="alarm-ctl">
+        <select id="alarm-level" title="哪些级别的告警会触发声音与动画">
+          <option value="fatal">仅「严重」触发</option>
+          <option value="error" selected>「严重」+「错误」触发</option>
+          <option value="all">全部级别触发</option>
+        </select>
+        <button class="mini" id="alarm-test" type="button">试听</button>
+        <button class="mini" id="alarm-mute" type="button">静音</button>
+      </span>
+    </h2>
     <div id="alarm-box"><div class="empty">读取中…</div></div>
   </section>
+
+  <div id="flash" aria-hidden="true"></div>
 
   <div class="transport">
     <button class="tbtn" id="btn-prev"><span class="ic">⏮</span>上一片段</button>
@@ -1197,7 +1241,103 @@ async function loadHealth() {
 // —— 告警（只读）——
 // 设备告警是 protobuf 二进制，由 server.js 的 /api/alarms 解码后返回结构化 JSON。
 // 这里只负责展示：中文名 + 中文说明 + 设备原文（原文一并保留，不丢信息）。
+// 另：出现「严重/错误」级告警时发出警告音 + 页面动画。
 let alarmsBusy = false;
+
+// ---- 告警音与动画设置（持久化在 localStorage）----
+const ALARM_LEVELS = { fatal: 2, error: 1, all: 0 }; // 触发阈值（severity >= 阈值）
+const ALARM_SOUND_SECONDS = 3;                       // 警告音时长
+const LS_LEVEL = 'aja_alarm_level';
+const LS_MUTE = 'aja_alarm_mute';
+
+function lsGet(k, dflt) {
+  try { const v = localStorage.getItem(k); return v === null ? dflt : v; } catch { return dflt; }
+}
+function lsSet(k, v) {
+  try { localStorage.setItem(k, v); } catch { /* 隐私模式忽略 */ }
+}
+
+let alarmLevel = lsGet(LS_LEVEL, 'error');
+if (!(alarmLevel in ALARM_LEVELS)) alarmLevel = 'error';
+let alarmMuted = lsGet(LS_MUTE, '0') === '1';
+
+// 已见过的「正在报」告警 id 集合 —— 只在**新出现**时触发声音/动画，不每次刷新都响
+let seenRaised = new Set();
+let alarmsFirstLoad = true;
+
+// ---- 警告音：Web Audio 现场合成，零依赖、无需音频文件 ----
+let audioCtx = null;
+let audioWarned = false;
+
+function ensureAudio() {
+  try {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  } catch {
+    return null;
+  }
+}
+
+// 一次「哔」：方波，带 10ms 起落避免爆音
+function beep(ctx, at, freq, dur, vol) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(freq, at);
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(vol, at + 0.01);
+  gain.gain.setValueAtTime(vol, at + Math.max(0.02, dur - 0.02));
+  gain.gain.linearRampToValueAtTime(0, at + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + dur + 0.02);
+}
+
+// 报警音型：高低交替的双哔为一组，组间停顿，共 seconds 秒
+function playAlarmSound(seconds) {
+  const ctx = ensureAudio();
+  if (!ctx) return false;
+  const total = seconds || ALARM_SOUND_SECONDS;
+  let t = ctx.currentTime + 0.03;
+  const end = t + total;
+  while (t < end) {
+    beep(ctx, t, 1046, 0.16, 0.2);          // C6
+    t += 0.22;
+    if (t >= end) break;
+    beep(ctx, t, 784, 0.16, 0.2);           // G5
+    t += 0.22;
+    t += 0.42;                              // 组间停顿
+  }
+  // 自动播放被拦时提示一次
+  if (ctx.state !== 'running' && !audioWarned) {
+    audioWarned = true;
+    toast('浏览器阻止了自动播放 —— 请先点一下页面任意位置，之后警告音即可正常发出', false);
+  }
+  return true;
+}
+
+// 全屏闪烁（一次性 5 次脉冲）
+let flashTimer = null;
+function flashPage() {
+  const f = $('flash');
+  if (!f) return;
+  f.classList.remove('on');
+  void f.offsetWidth; // 强制重排，让动画能重新播放
+  f.classList.add('on');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => f.classList.remove('on'), 3800);
+}
+
+// 页面首次交互时预热 AudioContext（浏览器要求用户手势后才能出声）
+['click', 'keydown', 'touchstart'].forEach((evName) =>
+  window.addEventListener(evName, () => { ensureAudio(); }, { once: true, passive: true }),
+);
 
 function alarmRow(sev, sevCn, name, desc, raw) {
   const row = document.createElement('div');
@@ -1233,10 +1373,30 @@ async function loadAlarms() {
   alarmsBusy = true;
   const box = $('alarm-box');
   const hint = $('alarm-hint');
+  const block = $('alarm-block');
   try {
     const a = await api('/api/alarms');
     box.innerHTML = '';
-    if (!a.raised_count) {
+    const raised = a.raised || [];
+
+    // 触发判定：severity >= 阈值（fatal=2 / error=1 / all=0）
+    const threshold = ALARM_LEVELS[alarmLevel];
+    const crit = raised.filter((r) => r.severity >= threshold);
+
+    // 只在「新出现」的告警上出声/闪烁
+    const nowIds = new Set(raised.map((r) => r.id));
+    const freshCrit = crit.filter((r) => !seenRaised.has(r.id));
+    seenRaised = nowIds;
+
+    block.classList.toggle('crit', crit.length > 0);
+
+    if (!alarmsFirstLoad && freshCrit.length) {
+      if (!alarmMuted) playAlarmSound(ALARM_SOUND_SECONDS);
+      flashPage();
+    }
+    alarmsFirstLoad = false;
+
+    if (!raised.length) {
       const ok = document.createElement('div');
       ok.className = 'alarm-ok';
       const dot = document.createElement('span');
@@ -1247,13 +1407,14 @@ async function loadAlarms() {
       hint.textContent = `读自设备 Alarms 系统（只读，不向设备写任何参数）· 已检查 ${a.total} 项`;
       return;
     }
-    const list = a.raised.slice().sort((x, y) => y.severity - x.severity);
+    const list = raised.slice().sort((x, y) => y.severity - x.severity);
     for (const r of list) {
       const sev = r.severity_key === 'FATAL' ? 'fatal' : r.severity_key === 'ERROR' ? 'err' : 'warn';
       const raw = (r.texts || []).filter((t) => t && t !== r.cn).join(' · ');
       box.appendChild(alarmRow(sev, r.severity_cn, r.cn, r.cn_hint, raw));
     }
-    hint.textContent = `共 ${a.raised_count} 条（最高级别：${a.worst_cn}）· 已检查 ${a.total} 项 · 只读`;
+    const trig = crit.length ? `· ${crit.length} 条触发声光` : '· 未达触发级别';
+    hint.textContent = `共 ${a.raised_count} 条（最高级别：${a.worst_cn}）· 已检查 ${a.total} 项 · 只读 ${trig}`;
   } catch (e) {
     box.innerHTML = '';
     const d = document.createElement('div');
@@ -1295,6 +1456,32 @@ $('btn-clips').addEventListener('click', loadClips);
 $('btn-add-dev').addEventListener('click', openAddDevice);
 $('btn-gang-rec').addEventListener('click', () => gangCommand('record'));
 $('btn-gang-stop').addEventListener('click', () => gangCommand('stop'));
+
+// —— 告警声光控件 ——
+$('alarm-level').value = alarmLevel;
+$('alarm-level').addEventListener('change', (e) => {
+  alarmLevel = e.target.value;
+  lsSet(LS_LEVEL, alarmLevel);
+  // 不重置已见集合：只有「新出现」的告警才触发，改阈值不会让存量告警立刻炸响
+  toast(`告警声光触发级别：${e.target.selectedOptions[0].textContent}`, true);
+});
+function renderMuteBtn() {
+  const b = $('alarm-mute');
+  b.textContent = alarmMuted ? '已静音' : '静音';
+  b.classList.toggle('primary', alarmMuted);
+}
+renderMuteBtn();
+$('alarm-mute').addEventListener('click', () => {
+  alarmMuted = !alarmMuted;
+  lsSet(LS_MUTE, alarmMuted ? '1' : '0');
+  renderMuteBtn();
+  if (alarmMuted) toast('已静音 —— 告警仍会在页面显示并闪烁', true);
+  else { playAlarmSound(1); toast('已取消静音', true); }
+});
+$('alarm-test').addEventListener('click', () => {
+  if (playAlarmSound(ALARM_SOUND_SECONDS)) { flashPage(); toast('警告音 + 闪烁动画 试听', true); }
+  else toast('当前浏览器不支持 Web Audio，无法发出警告音', false);
+});
 $('auto-refresh').addEventListener('change', () => {});
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) refreshAll(); }, 3000);
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) loadClips(); }, 20000);
