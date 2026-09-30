@@ -70,10 +70,12 @@
   .mini.rec:hover { border-color: var(--red); }
   .mini.stop { border-color: #2a3a4a; }
 
-  .note {
-    color: var(--dim); font-size: 12px; margin: -4px 0 14px; padding-left: 2px; line-height: 1.6;
+  /* 卡片标题旁的小提示图标：与标题同高、弱化色，hover 才出 title */
+  .k .iwarn {
+    font-size: 11px; line-height: 1; color: #6f7d90; margin-left: 4px;
+    cursor: help; user-select: none; vertical-align: 1px;
   }
-  .note b { color: var(--text); font-weight: 600; }
+  .k .iwarn:hover { color: var(--amber); }
 
   /* 弹窗 */
   #modal {
@@ -242,18 +244,12 @@
     <div class="card"><div class="k" title="eParamID_RecordFormat —— 设备侦测值，只读。录制格式跟随 SDI 输入信号。">录制格式<small>（侦测·只读）</small></div><div class="v" id="st-recfmt">—</div></div>
     <div class="card"><div class="k">当前片段</div><div class="v" id="st-clip">—</div></div>
     <div class="card"><div class="k">介质槽</div><div class="v" id="st-slot">—</div></div>
-    <div class="card"><div class="k" title="eParamID_DetectMediaFormat —— 设备按当前 SDI 输入信号侦测出的介质格式，只读。录像机没有可写的分辨率/帧率参数。">介质格式<small>（跟随输入信号）</small> / 卷名</div><div class="v" id="st-mediafmt">—</div></div>
+    <div class="card"><div class="k">介质格式<small>（跟随输入信号）</small> / 卷名<span class="iwarn" title="分辨率/帧率在摄像机端决定。Ki Pro 的录制格式跟随 SDI 输入信号——录像机侧只有侦测显示（RecordFormat/DetectMediaFormat，参数表均 readonly），没有可写的录制格式参数。要改请调摄像机输出或 SDI 信号源。">⚠</span></div><div class="v" id="st-mediafmt">—</div></div>
     <div class="card wide">
       <div class="k">剩余空间</div>
       <div class="v" id="st-avail">—</div>
       <div class="bar"><i id="st-avail-bar" style="width:0%"></i></div>
     </div>
-  </div>
-
-  <div class="note">
-    <b>分辨率 / 帧率在摄像机端决定。</b>Ki Pro 的录制格式<b>跟随 SDI 输入信号</b>——录像机侧只有侦测显示（
-    <code>RecordFormat</code> / <code>DetectMediaFormat</code>，设备参数表中均标记 <code>readonly</code>），
-    <b>没有可写的录制格式参数</b>。要改分辨率/帧率请调摄像机输出，或改 SDI 信号源。
   </div>
 
   <div class="transport">
