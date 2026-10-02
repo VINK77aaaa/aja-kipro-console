@@ -1,21 +1,24 @@
 @echo off
-chcp 65001 >nul
+rem AJA Ki Pro ÖĞÎÄ¿ØÖÆÌ¨Æô¶¯Æ÷£¨±¾ÎÄ¼ş±ØĞë±£´æÎª ANSI/GBK ±àÂë£¬UTF-8 »áÔÚÖĞÎÄÏµÍ³ cmd ÏÂÂÒÂë£©
 cd /d "%~dp0"
 
 where node >nul 2>nul
-if errorlevel 1 (
-  echo [æç¤º] è¿™å°ç”µè„‘æ²¡æœ‰å®‰è£… Node.jsï¼Œæ— æ³•ä»¥ç‹¬ç«‹æœåŠ¡æ–¹å¼å¯åŠ¨é¢æ¿ã€‚
-  echo.
-  echo æ–¹æ¡ˆä¸€ï¼ˆæ¨èï¼Œé›¶å®‰è£…ï¼‰ï¼šåœ¨ä¸»æ§ç”µè„‘ä¸ŠåŒå‡»"å¯åŠ¨ä¸­æ–‡æ§åˆ¶å°.bat"ï¼Œ
-  echo        ç„¶ååœ¨æœ¬æœºæµè§ˆå™¨ç›´æ¥æ‰“å¼€  http://ä¸»æ§ç”µè„‘IP:8321
-  echo æ–¹æ¡ˆäºŒï¼šæœ¬æœºå®‰è£… Node.js åå†è¿è¡Œæœ¬è„šæœ¬ï¼š
-  echo        winget install OpenJS.NodeJS.LTS
-  echo.
-  pause
-  exit /b 1
-)
+if errorlevel 1 goto NONODE
 
 start "" http://127.0.0.1:8321
-echo AJA Ki Pro ä¸­æ–‡æ§åˆ¶å°å¯åŠ¨ä¸­...ï¼ˆå…³é—­æœ¬çª—å£å³åœæ­¢æœåŠ¡ï¼‰
+echo AJA Ki Pro ÖĞÎÄ¿ØÖÆÌ¨Æô¶¯ÖĞ...£¨¹Ø±Õ±¾´°¿Ú¼´Í£Ö¹·şÎñ£©
+chcp 65001 >nul
 node server.js
 pause
+exit /b 0
+
+:NONODE
+echo [ÌáÊ¾] ÕâÌ¨µçÄÔÃ»ÓĞ°²×° Node.js£¬ÎŞ·¨ÒÔ¶ÀÁ¢·şÎñ·½Ê½Æô¶¯Ãæ°å¡£
+echo.
+echo ·½°¸Ò»£¨ÍÆ¼ö£¬Áã°²×°£©£ºÔÚÖ÷¿ØµçÄÔÉÏË«»÷"Æô¶¯ÖĞÎÄ¿ØÖÆÌ¨.bat"£¬
+echo        È»ºóÔÚ±¾»úä¯ÀÀÆ÷Ö±½Ó´ò¿ª  http://Ö÷¿ØµçÄÔIP:8321
+echo ·½°¸¶ş£º±¾»ú°²×° Node.js ºóÔÙÔËĞĞ±¾½Å±¾£º
+echo        winget install OpenJS.NodeJS.LTS
+echo.
+pause
+exit /b 1
