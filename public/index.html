@@ -768,12 +768,17 @@ function renderDeviceBar() {
   }
 }
 
+let devicesBusy = false; // 重入保护：30 秒定时器与 init()/loadAlarmsOverview 可能撞车
 async function loadDevices() {
+  if (devicesBusy) return;
+  devicesBusy = true;
   try {
     const data = await api('/api/devices');
     applyDeviceList(data.devices || []);
   } catch (e) {
     // 设备清单拿不到时保持静默，refreshAll 会给出离线横幅
+  } finally {
+    devicesBusy = false;
   }
 }
 
@@ -1096,7 +1101,7 @@ async function onConfigChange(item, sel) {
   if (!ok) { sel.value = oldValue; return; }
   sel.disabled = true;
   try {
-    const res = await api('/api/set', { param: cur.param, value: newValue });
+    const res = await api('/api/set', { param: cur.param, value: newValue }, { method: 'POST' });
     if (res.verified && res.applied === false) {
       toast(`未生效：${item.label} 仍为 ${res.actual_value_name || res.actual_value}（设备可能拒绝了该值）`, false);
     } else {
@@ -1213,7 +1218,7 @@ async function applyNaming() {
   const errs = [];
   for (const it of plan) {
     try {
-      const res = await api('/api/set', { param: it.p, value: it.value });
+      const res = await api('/api/set', { param: it.p, value: it.value }, { method: 'POST' });
       if (res.verified && res.applied === false) {
         errs.push(`${it.label} 未生效（设备现值 ${res.actual_value_name || res.actual_value}）`);
       }
@@ -1245,7 +1250,7 @@ for (const b of TRANSPORT_BTN) {
     if (b.confirm && !confirm(`确认向设备下发【${b.name}】命令？\n\n（当前无输入信号时设备会拒绝录制）`)) return;
     try {
       // 走带是瞬时命令，不做回读校验
-      await api('/api/set', { param: 'eParamID_TransportCommand', value: String(b.value), verify: '0' });
+      await api('/api/set', { param: 'eParamID_TransportCommand', value: String(b.value), verify: '0' }, { method: 'POST' });
       toast('已发送：' + b.name, true);
     } catch (e) {
       toast('发送失败：' + e.message, false);
@@ -1602,7 +1607,8 @@ async function fetchAlarmsFor(dev) {
   if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
   return data;
 }
-async function loadAlarms() {
+async function loadAlarmsOverview() {
+  // 注意：不能叫 loadAlarms——那是下方「告警详情·当前设备」的函数名，重名会静默覆盖
   const box = $('alarm-rows');
   if (!state.devices.length) {
     try { await loadDevices(); } catch {} // 初始竞态：设备清单可能还没回来
@@ -1613,46 +1619,53 @@ async function loadAlarms() {
   }
   const online = state.devices.filter((d) => d.online);
   const offline = state.devices.filter((d) => !d.online);
-  const results = [];
-  for (let i = 0; i < online.length; i += 3) {
-    await Promise.all(online.slice(i, i + 3).map(async (d) => {
+  // 信号量限流 3，但不做队头阻塞：工作池消费完为止，谁先回来谁先入表
+  const byId = new Map();
+  let idx = 0;
+  const workers = Array.from({ length: Math.min(3, online.length) }, async () => {
+    while (idx < online.length) {
+      const d = online[idx++];
       try {
-        results.push({ d, ok: true, a: await fetchAlarmsFor(d) });
+        byId.set(String(d.id), { ok: true, a: await fetchAlarmsFor(d) });
       } catch (e) {
-        results.push({ d, ok: false, err: e.message });
+        byId.set(String(d.id), { ok: false, err: e.message });
       }
-    }));
-  }
+    }
+  });
+  await Promise.all(workers);
+  // 按设备清单原顺序渲染：离线/失败/成功位置稳定，不跳动
   let html = '';
-  for (const r of results) {
-    if (!r.ok) {
-      html += alarmRowHtml(r.d, 'off', `<span class="alarm-badge off">读取失败</span><span class="alarm-detail">${escAlarm(r.err)}</span>`);
+  for (const d of state.devices) {
+    if (!d.online) {
+      html += alarmRowHtml(d, 'off', '<span class="alarm-badge off">离线</span>');
+      continue;
+    }
+    const r = byId.get(String(d.id));
+    if (!r || !r.ok) {
+      html += alarmRowHtml(d, 'off', `<span class="alarm-badge off">读取失败</span><span class="alarm-detail">${escAlarm(r ? r.err : '未返回')}</span>`);
       continue;
     }
     const a = r.a;
     const raised = a.raised || [];
     if (!raised.length) {
-      html += alarmRowHtml(r.d, 'ok', '<span class="alarm-badge ok">无报警</span>');
+      html += alarmRowHtml(d, 'ok', '<span class="alarm-badge ok">无报警</span>');
       continue;
     }
     const cls = (a.worst === 'FATAL' || a.worst === 'ERROR') ? 'err' : 'warn';
     const names = raised.map((x) => escAlarm(x.cn)).join('、');
     const texts = raised.flatMap((x) => x.texts || []).slice(0, 3).map(escAlarm).join('；');
     html += alarmRowHtml(
-      r.d,
+      d,
       cls,
       `<span class="alarm-badge ${cls}">${raised.length} 项报警 · ${escAlarm(a.worst_cn || '')}</span>` +
         `<span class="alarm-detail">${names}${texts ? ' —— ' + texts : ''}</span>`,
     );
   }
-  for (const d of offline) {
-    html += alarmRowHtml(d, 'off', '<span class="alarm-badge off">离线</span>');
-  }
   box.innerHTML = html || '<div class="empty">没有在线设备</div>';
 }
-$('btn-alarms').addEventListener('click', loadAlarms);
-setInterval(() => { if (!document.hidden) loadAlarms(); }, 15000);
-loadAlarms();
+$('btn-alarms').addEventListener('click', loadAlarmsOverview);
+setInterval(() => { if (!document.hidden) loadAlarmsOverview(); }, 15000);
+loadAlarmsOverview();
 setInterval(() => { if (!document.hidden) loadHealth(); }, 10000);
 setInterval(() => { if (!document.hidden) loadDevices(); }, 30000);
 

@@ -530,6 +530,28 @@ async function fetchAlarms(device) {
 }
 
 // ==================== 服务 ====================
+// —— 写操作防伪造（CSRF）闸门 ——
+// 0.0.0.0 监听后，局域网内任何网页都能构造跨站请求（<img> / 隐形表单）。
+// 规则：① /api/set、/api/gang 必须用 POST（挡掉 <img> 这类 GET 简单请求）；
+//      ② 浏览器跨站 POST 一定带 Origin 头——只要 Origin 存在且不是本面板地址，一律 403。
+// 非浏览器客户端（curl/脚本）不带 Origin，仍可写——这是留给用户自动化的口子。
+function writeGuard(req, res, label) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: `${label} 只接受 POST（防局域网跨站伪造写请求）` });
+    return false;
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    let sameHost = false;
+    try { sameHost = new URL(origin).host === req.headers.host; } catch {}
+    if (!sameHost) {
+      sendJson(res, 403, { error: `${label} 拒绝跨站写入（Origin 与面板地址不符）` });
+      return false;
+    }
+  }
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
   const p = u.pathname;
@@ -669,6 +691,7 @@ const server = http.createServer(async (req, res) => {
     // cmd=record(3) | stop(4)；devs 为逗号分隔的设备 id/名称，缺省=全部设备。
     // 走带是瞬时命令，verify=0（不回读），与单机按钮语义一致。
     if (p === '/api/gang' && req.method === 'POST') {
+      if (!writeGuard(req, res, '群发命令')) return;
       const cmd = (u.searchParams.get('cmd') || '').trim().toLowerCase();
       const value = cmd === 'record' ? 3 : cmd === 'stop' ? 4 : null;
       if (value === null) return sendJson(res, 400, { error: 'cmd 只能是 record 或 stop' });
@@ -818,6 +841,7 @@ const server = http.createServer(async (req, res) => {
     // 写参数（改动设置会真实下发到设备）
     // verify=0 跳过回读校验（走带命令这类瞬时命令用）
     if (p === '/api/set') {
+      if (!writeGuard(req, res, '写参数')) return;
       const dev = resolveDevice(u.searchParams.get('dev'));
       if (!dev) return sendJson(res, 400, { error: '未知设备' });
       const name = u.searchParams.get('param') || '';
