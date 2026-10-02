@@ -270,3 +270,14 @@ AJA_STOP_LOCK=0 node server.js
 - `devices.txt` —— 多机设备列表（一行一台）
 - `param-enums.json` —— 从设备前端 JS 提取的枚举表（开发参考，可删）
 - `启动中文控制台.bat` —— 双击启动本面板（推荐入口）
+
+## 在没有装 Node.js 的电脑上用
+
+启动器 `启动中文控制台.bat` 会按下面的顺序自己解决运行时：
+
+1. 系统 PATH 里找 `node` —— 有就直接用；
+2. 找本目录自带的 `runtime\node.exe` —— 有就直接用；
+3. 都没有 → **自动下载便携版**（nodejs.org 官方 v22.14.0 LTS 的单文件 node.exe，约 80MB，保存到 `runtime\`，只需一次，之后离线可用），下载完自动启动面板；
+4. 下载失败（没联网/被拦截）→ 提示两条替代路线：浏览器直开主控机面板地址，或手动 `winget install OpenJS.NodeJS.LTS`。
+
+`runtime/` 已在 `.gitignore` 里，不会被提交。
