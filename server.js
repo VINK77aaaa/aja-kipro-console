@@ -897,9 +897,20 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PANEL_PORT, '127.0.0.1', () => {
+server.listen(PANEL_PORT, '0.0.0.0', () => {
+  // 监听全部网卡：其他电脑无需安装 Node，浏览器直接打开下面的局域网地址即可
+  const ips = [];
+  for (const list of Object.values(require('os').networkInterfaces())) {
+    for (const ni of list || []) {
+      if (ni.family === 'IPv4' && !ni.internal) ips.push(ni.address);
+    }
+  }
   console.log('AJA Ki Pro 中文控制台已启动');
-  console.log(`  本地面板:  http://127.0.0.1:${PANEL_PORT}`);
+  console.log(`  本机面板:   http://127.0.0.1:${PANEL_PORT}`);
+  for (const ip of ips) {
+    console.log(`  局域网面板: http://${ip}:${PANEL_PORT}  ← 其他电脑浏览器直接打开，无需安装 Node`);
+  }
+  if (ips.length) console.log('  ⚠ 局域网内任何人都能通过面板操作设备配置，请勿在不可信网络使用');
   console.log(`  设备列表来源: ${devicesSource() === 'env' ? '环境变量 AJA_DEVICES' : devicesSource() === 'file' ? 'devices.txt' : devicesSource() === 'env-ip' ? '环境变量 AJA_DEVICE_IP' : '内置默认'}`);
   DEVICES.forEach((d) => console.log(`  设备 ${d.name}:  http://${d.ip} （英文版，不受影响）`));
   console.log('  Ctrl+C 停止');
