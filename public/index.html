@@ -79,6 +79,21 @@
   .k .iwarn:hover, .k .iwarn:focus-visible { color: var(--amber); outline: none; }
   .k .iwarn[aria-expanded="true"] { color: var(--amber); }
 
+  /* —— 多机报警总览：每台一行，两栏（设备 | 报警状态） —— */
+  .alarm-row { display: grid; grid-template-columns: 190px 1fr; gap: 12px; align-items: center; background: var(--card2); border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px; padding: 9px 14px; margin-bottom: 8px; }
+  .alarm-row.ok  { border-left-color: var(--green); }
+  .alarm-row.warn{ border-left-color: var(--amber); }
+  .alarm-row.err { border-left-color: var(--red); }
+  .alarm-row.off { border-left-color: #3a4351; opacity: .7; }
+  .alarm-dev { font-weight: 600; }
+  .alarm-dev small { display: block; color: var(--dim); font-weight: 400; font-size: 11.5px; }
+  .alarm-badge { display: inline-block; border-radius: 8px; padding: 2px 10px; font-weight: 700; font-size: 13px; margin-right: 8px; }
+  .alarm-badge.ok  { background: #11321f; color: #5fe39a; }
+  .alarm-badge.warn{ background: #3a2c10; color: #ffd07a; }
+  .alarm-badge.err { background: #4a1417; color: #ff7d81; }
+  .alarm-badge.off { background: #2a3140; color: var(--dim); }
+  .alarm-detail { color: var(--dim); font-size: 12.5px; }
+
   /* 说明气泡（hover 或点击图标出现；点击后固定，点别处 / Esc 关闭） */
   .tip {
     position: fixed; z-index: 30; max-width: 340px; pointer-events: none;
@@ -293,6 +308,12 @@
 
   <div id="banner"></div>
 
+  <section class="block" id="alarm-section">
+    <h2>报警总览 · 全部设备 <span class="hint">每台一行 · 15 秒自动刷新</span><span style="flex:1"></span><button class="mini" id="btn-alarms">↻ 刷新报警</button></h2>
+    <div id="alarm-rows"><div class="empty">正在读取…</div></div>
+  </section>
+
+
   <div class="grid" id="status-grid">
     <div class="card tc"><div class="k">时码 TIMECODE</div><div class="v" id="st-timecode">--:--:--:--</div></div>
     <div class="card"><div class="k">走带状态</div><div class="v"><span class="badge" id="st-transport">—</span></div></div>
@@ -309,8 +330,8 @@
   </div>
 
   <section class="block" id="alarm-block">
-    <h2>告警
-      <span class="hint" id="alarm-hint">读自设备 Alarms 系统（只读，不向设备写任何参数）</span>
+    <h2>告警详情 · 当前设备
+      <span class="hint" id="alarm-hint">多机总览见页面顶部「报警总览」；此处读自设备 Alarms 系统（只读，不向设备写任何参数）</span>
       <span class="alarm-ctl">
         <select id="alarm-level" title="哪些级别的告警会触发声音与动画">
           <option value="fatal">仅「严重」触发</option>
@@ -1565,6 +1586,73 @@ $('alarm-mute').addEventListener('click', () => {
 $('auto-refresh').addEventListener('change', () => {});
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) refreshAll(); }, 3000);
 setInterval(() => { if ($('auto-refresh').checked && !document.hidden) loadClips(); }, 20000);
+
+// ============ 多机报警总览：每台一行，两栏（设备 | 报警状态） ============
+// 只对在线设备拉取（离线设备直接标灰，避免 8 秒超时拖慢刷新）；只读，不写任何设备参数。
+function escAlarm(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function alarmRowHtml(d, cls, stateHtml) {
+  return `<div class="alarm-row ${cls}"><div class="alarm-dev">${escAlarm(d.name)}<small>${escAlarm(d.ip)}${d.product ? ' · ' + escAlarm(d.product) : ''}</small></div><div class="alarm-state">${stateHtml}</div></div>`;
+}
+async function fetchAlarmsFor(dev) {
+  // 注意：不能用 api() 助手——它会把 dev 固定为"当前设备"，这里必须逐台指定
+  const r = await fetch('/api/alarms?dev=' + encodeURIComponent(dev.id));
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+  return data;
+}
+async function loadAlarms() {
+  const box = $('alarm-rows');
+  if (!state.devices.length) {
+    try { await loadDevices(); } catch {} // 初始竞态：设备清单可能还没回来
+  }
+  if (!state.devices.length) {
+    box.innerHTML = '<div class="empty">还没有设备 —— 先在上方「添加设备」</div>';
+    return;
+  }
+  const online = state.devices.filter((d) => d.online);
+  const offline = state.devices.filter((d) => !d.online);
+  const results = [];
+  for (let i = 0; i < online.length; i += 3) {
+    await Promise.all(online.slice(i, i + 3).map(async (d) => {
+      try {
+        results.push({ d, ok: true, a: await fetchAlarmsFor(d) });
+      } catch (e) {
+        results.push({ d, ok: false, err: e.message });
+      }
+    }));
+  }
+  let html = '';
+  for (const r of results) {
+    if (!r.ok) {
+      html += alarmRowHtml(r.d, 'off', `<span class="alarm-badge off">读取失败</span><span class="alarm-detail">${escAlarm(r.err)}</span>`);
+      continue;
+    }
+    const a = r.a;
+    const raised = a.raised || [];
+    if (!raised.length) {
+      html += alarmRowHtml(r.d, 'ok', '<span class="alarm-badge ok">无报警</span>');
+      continue;
+    }
+    const cls = (a.worst === 'FATAL' || a.worst === 'ERROR') ? 'err' : 'warn';
+    const names = raised.map((x) => escAlarm(x.cn)).join('、');
+    const texts = raised.flatMap((x) => x.texts || []).slice(0, 3).map(escAlarm).join('；');
+    html += alarmRowHtml(
+      r.d,
+      cls,
+      `<span class="alarm-badge ${cls}">${raised.length} 项报警 · ${escAlarm(a.worst_cn || '')}</span>` +
+        `<span class="alarm-detail">${names}${texts ? ' —— ' + texts : ''}</span>`,
+    );
+  }
+  for (const d of offline) {
+    html += alarmRowHtml(d, 'off', '<span class="alarm-badge off">离线</span>');
+  }
+  box.innerHTML = html || '<div class="empty">没有在线设备</div>';
+}
+$('btn-alarms').addEventListener('click', loadAlarms);
+setInterval(() => { if (!document.hidden) loadAlarms(); }, 15000);
+loadAlarms();
 setInterval(() => { if (!document.hidden) loadHealth(); }, 10000);
 setInterval(() => { if (!document.hidden) loadDevices(); }, 30000);
 
