@@ -2,3 +2,4 @@ panel.log
 
 # 便携版 Node 运行时（启动器自动下载）
 runtime/
+*.gbk
